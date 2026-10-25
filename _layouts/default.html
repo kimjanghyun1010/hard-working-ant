@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="{{ site.lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% seo %}
+{% feed_meta %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+{%- assign v = site.time | date: '%s' %}
+<link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}?v={{ v }}">
+<script src="{{ '/assets/js/main.js' | relative_url }}?v={{ v }}" defer></script>
+{%- if page.scripts %}
+<script src="{{ '/assets/js/figure.js' | relative_url }}?v={{ v }}" defer></script>
+{%- for s in page.scripts %}
+<script src="{{ '/assets/js/' | append: s | relative_url }}?v={{ v }}" defer></script>
+{%- endfor %}
+{%- endif %}
+</head>
+<body data-search="{{ '/search.json' | relative_url }}">
+<header class="site-header">
+  <div class="site-header-inner">
+    <a class="brand" href="{{ '/' | relative_url }}">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect width="26" height="26" rx="7" fill="#4f46e5"/><g fill="#fff"><circle cx="7.4" cy="13" r="2"/><circle cx="12" cy="13" r="2.4"/><ellipse cx="18" cy="13" rx="3.4" ry="2.8"/></g></svg>
+      hard-working-ant
+    </a>
+    <button type="button" class="search-open" data-search-open aria-label="글 검색">
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span>글 검색</span><kbd>/</kbd>
+    </button>
+    <nav class="site-nav" aria-label="주 메뉴">
+      <a href="{{ '/' | relative_url }}"{% if page.url == '/' or page.layout == 'post' %} aria-current="page"{% endif %}>글</a>
+      <a href="{{ '/series/' | relative_url }}"{% if page.url == '/series/' %} aria-current="page"{% endif %}>시리즈</a>
+      <a href="{{ '/tags/' | relative_url }}"{% if page.url == '/tags/' %} aria-current="page"{% endif %}>태그</a>
+      <a href="https://github.com/{{ site.repository }}">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main>
+{{ content }}
+</main>
+<footer class="site-footer">
+  <div>
+    <span>© {{ site.time | date: '%Y' }} {{ site.author }}</span>
+    <span class="footer-links"><a href="{{ '/feed.xml' | relative_url }}">RSS</a><a href="https://github.com/{{ site.repository }}">GitHub</a></span>
+  </div>
+</footer>
+<dialog id="search" class="search" aria-label="글 검색">
+  <input type="search" placeholder="제목, 태그, 본문 검색" aria-label="검색어" autocomplete="off">
+  <ul></ul>
+</dialog>
+</body>
+</html>

@@ -1,0 +1,20 @@
+---
+layout: default
+title: 시리즈
+permalink: /series/
+---
+<div class="page">
+  <h1 class="post-title">시리즈</h1>
+  {%- assign groups = site.posts | where_exp: "p", "p.series" | group_by: "series" %}
+  {%- for g in groups %}
+  <section id="{{ g.name | slugify }}">
+    <h2 class="list-head">{{ g.name }} <span>{{ g.size }}</span></h2>
+    <ul class="post-list">
+      {%- assign items = g.items | reverse %}
+      {%- for p in items %}
+      {% include post-item.html post=p %}
+      {%- endfor %}
+    </ul>
+  </section>
+  {%- endfor %}
+</div>

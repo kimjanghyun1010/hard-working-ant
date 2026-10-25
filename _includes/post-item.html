@@ -1,0 +1,11 @@
+<li>
+  <a class="title" href="{{ include.post.url | relative_url }}">{{ include.post.title }}</a>
+  {%- if include.post.description %}
+  <p>{{ include.post.description }}</p>
+  {%- endif %}
+  <div class="meta">
+    <time datetime="{{ include.post.date | date_to_xmlschema }}">{{ include.post.date | date: "%Y-%m-%d" }}</time>
+    {%- if include.post.series %}<span>{{ include.post.series }}</span>{% endif %}
+    {%- for t in include.post.tags %}<span class="tag">{{ t }}</span>{% endfor %}
+  </div>
+</li>

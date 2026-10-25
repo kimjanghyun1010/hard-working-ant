@@ -1,0 +1,58 @@
+---
+layout: default
+---
+{%- assign series_posts = site.posts | where: "series", page.series | reverse -%}
+{%- assign groups = site.posts | where_exp: "p", "p.series" | group_by: "series" -%}
+<div class="doc">
+  <aside class="doc-nav" aria-label="시리즈 목록">
+    {%- for g in groups %}
+    <p class="side-title">{{ g.name }}</p>
+    <nav class="series-nav">
+      {%- assign items = g.items | reverse -%}
+      {%- for p in items %}
+      <a href="{{ p.url | relative_url }}"{% if p.url == page.url %} aria-current="page"{% endif %}>{{ p.title }}</a>
+      {%- endfor %}
+    </nav>
+    {%- endfor %}
+  </aside>
+
+  <article class="doc-main">
+    <nav class="crumbs" aria-label="위치">
+      <a href="{{ '/' | relative_url }}">글</a>
+      {%- if page.series %}
+      <span>/</span><a href="{{ '/series/' | relative_url }}#{{ page.series | slugify }}">{{ page.series }}</a>
+      {%- for p in series_posts %}{% if p.url == page.url %}<span>/</span><span>{{ forloop.index | prepend: '0' | slice: -2, 2 }}</span>{% endif %}{% endfor %}
+      {%- endif %}
+    </nav>
+    <h1 class="post-title">{{ page.title }}</h1>
+    {%- if page.description %}
+    <p class="post-lede">{{ page.description }}</p>
+    {%- endif %}
+    <div class="post-meta">
+      <span>{{ site.author }}</span>
+      <time datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: "%Y-%m-%d" }}</time>
+      {%- for t in page.tags %}
+      <a class="tag" href="{{ '/tags/' | relative_url }}#{{ t | slugify }}">{{ t }}</a>
+      {%- endfor %}
+      <a class="edit" href="https://github.com/{{ site.repository }}/edit/main/{{ page.path }}">GitHub에서 수정 제안</a>
+    </div>
+
+    <div class="prose">
+{{ content }}
+    </div>
+
+    <nav class="pager" aria-label="이전 글과 다음 글">
+      {%- if page.previous %}
+      <a href="{{ page.previous.url | relative_url }}"><span>이전</span><b>{{ page.previous.title }}</b></a>
+      {%- endif %}
+      {%- if page.next %}
+      <a class="next" href="{{ page.next.url | relative_url }}"><span>다음</span><b>{{ page.next.title }}</b></a>
+      {%- endif %}
+    </nav>
+  </article>
+
+  <aside class="doc-toc" aria-label="이 글의 목차">
+    <p class="side-title">이 페이지</p>
+    <nav class="toc" id="toc"></nav>
+  </aside>
+</div>
