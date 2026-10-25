@@ -1,0 +1,16 @@
+title: Hard Working Ant
+description: 기술 블로그
+author: kimjanghyun
+github_username: kimjanghyun1010
+lang: ko
+timezone: Asia/Seoul
+
+url: https://kimjanghyun1010.github.io
+baseurl: /hard-working-ant
+
+theme: minima
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+permalink: /:year/:month/:day/:title/
