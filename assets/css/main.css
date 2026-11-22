@@ -59,7 +59,7 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border: 1px solid var(--border);
 .toc a:hover { color: var(--text-strong); }
 .toc a.active { border-left-color: var(--accent); color: var(--accent-text); font-weight: 500; }
 @media (max-width: 1180px) {
-  .doc { grid-template-columns: minmax(0, 1fr) 180px; grid-template-areas: "main toc" "nav nav"; }
+  .doc { grid-template-columns: minmax(0, 1fr) 180px; grid-template-areas: "main toc" "nav ."; }
   .doc-nav { position: static; max-height: none; border-top: 1px solid var(--border); }
 }
 @media (max-width: 860px) {
@@ -93,6 +93,14 @@ a.tag:hover { border-color: #c7d2fe; color: var(--accent-text); }
 .prose blockquote.warn { border-color: #fed7aa; background: var(--warn-soft); color: #7c2d12; }
 .prose blockquote.warn strong { color: #9a3412; }
 .table-wrap { margin: 24px 0; overflow-x: auto; }
+.table-fold { margin: 24px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.table-fold > summary { display: flex; align-items: center; gap: 10px; padding: 10px 14px; color: var(--text-strong); font-size: 14px; font-weight: 600; cursor: pointer; list-style: none; }
+.table-fold > summary::-webkit-details-marker { display: none; }
+.table-fold > summary::before { content: ""; flex: none; border: solid transparent; border-width: 5px 0 5px 7px; border-left-color: var(--text-muted); transition: transform .15s; }
+.table-fold[open] > summary::before { transform: rotate(90deg); }
+.table-fold > summary:hover { background: var(--bg-subtle); }
+.table-fold > summary span { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 13px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.table-fold .table-wrap { margin: 0; border-top: 1px solid var(--border); }
 .prose table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .prose th, .prose td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .prose th { color: var(--text-strong); font-weight: 600; background: var(--bg-subtle); white-space: nowrap; }
@@ -108,6 +116,7 @@ a.tag:hover { border-color: #c7d2fe; color: var(--accent-text); }
 .code-copy:hover { background: #fff; color: var(--text-strong); }
 .code .highlighter-rouge, .code .highlight { margin: 0; }
 .prose pre { margin: 0; padding: 16px 20px; overflow-x: auto; background: #fff; color: #1f2937; font: 13px/1.8 var(--mono); }
+.prose pre strong { font-weight: 700; color: var(--accent-text); }
 .highlight .k, .highlight .kd, .highlight .kn, .highlight .kc, .highlight .kr, .highlight .nt { color: #4338ca; }
 .highlight .nf, .highlight .nb, .highlight .fm, .highlight .nc { color: #0f766e; }
 .highlight .s, .highlight .s1, .highlight .s2, .highlight .sb, .highlight .se, .highlight .sh { color: #15803d; }
@@ -118,7 +127,11 @@ a.tag:hover { border-color: #c7d2fe; color: var(--accent-text); }
 /* figure */
 .fig { margin: 28px 0 36px; }
 .fig figcaption { margin-top: 10px; font-size: 13px; color: var(--text-muted); text-align: center; }
-.cv-box { padding: 24px 28px; border: 1px solid var(--border); border-radius: 12px; background: #fff; cursor: pointer; }
+.cv-box { position: relative; padding: 24px 28px; border: 1px solid var(--border); border-radius: 12px; background: #fff; cursor: pointer; }
+/* State mark: a play triangle while running, two bars while paused. */
+.cv-box::after { content: ""; position: absolute; top: 6px; right: 6px; box-sizing: border-box; width: 0; height: 0; border: solid transparent; border-width: 5px 0 5px 8px; border-left-color: var(--accent); opacity: .5; transition: opacity .15s; }
+.cv-box:hover::after { opacity: .9; }
+.cv-box.is-paused::after { width: 8px; height: 10px; border-color: var(--text-muted); border-width: 0 2.5px; opacity: .9; }
 .cv-box canvas { display: block; width: 100%; }
 @media (max-width: 720px) {
   .cv-box { padding: 16px 12px; }
@@ -158,3 +171,7 @@ a.tag:hover { border-color: #c7d2fe; color: var(--accent-text); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+.cv-scenes { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; color: var(--text-muted); font-size: 12px; }
+.cv-scenes button { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--text-muted); font: inherit; font-weight: 600; cursor: pointer; }
+.cv-scenes button:hover { border-color: var(--accent-2); color: var(--accent-text); }
+.cv-scenes button[aria-current="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }

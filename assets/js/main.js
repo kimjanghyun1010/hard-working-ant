@@ -50,11 +50,17 @@
     setTimeout(() => { btn.textContent = '복사'; }, 1500);
   });
 
+  // Tables start folded; the summary lists the columns so readers know what is inside.
   document.querySelectorAll('.prose > table').forEach((t) => {
-    const wrap = document.createElement('div');
+    const fold = document.createElement('details'), summary = document.createElement('summary'), info = document.createElement('span'), wrap = document.createElement('div');
+    fold.className = 'table-fold';
     wrap.className = 'table-wrap';
-    t.before(wrap);
+    const cols = [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim()).filter(Boolean);
+    info.textContent = `${cols.join(', ')} (${t.querySelectorAll('tbody tr').length}행)`;
+    summary.append('표 보기', info);
+    t.before(fold);
     wrap.append(t);
+    fold.append(summary, wrap);
   });
 
   // Table of contents with scroll tracking.
