@@ -534,7 +534,7 @@
         ['epoll', 'loop', 'epoll이 메인 스레드를 깨운다'], ['loop', 'v8', '콜백을 실행한다'],
       ] },
       { pill: 'GC와 JIT', tone: 'ok', note: '메인 스레드가 JS를 도는 동안 GC와 JIT 컴파일은 V8 헬퍼 스레드가 따로 돌린다. JS 실행은 하나여도 CPU는 그보다 더 쓴다.', steps: [
-        ['v8', 'gc', '힙을 훑는 GC가 같이 돈다', 'keep'], ['v8', 'jit', '자주 도는 코드를 기계어로 바꾼다', 'keep'],
+        ['v8', 'gc', 'GC가 메인 스레드와 같이 돈다', 'keep'], ['v8', 'jit', '자주 도는 코드를 기계어로 바꾼다', 'keep'],
       ] },
     ];
     const LEN = scenes.map((s) => s.steps.length * STEP + HOLD), TOTAL = LEN.reduce((a, b) => a + b, 0);
@@ -644,10 +644,10 @@
         const t = hwa.loop(time, SEC, HOLD).t, share = hwa.smooth(t / SEC), num = Math.round(10 ** (4 * share)).toLocaleString('en-US');
         const pw = (w - 12) / 2;
         C.pill(ctx, 0, 0, `동시 요청 ${num}건`, 'info');
-        if (w > 520) C.text(ctx, '요청마다 CPU는 몇백 µs, 나머지는 DB 응답 기다림', w, 11, { size: 10, align: 'right', base: 'middle' });
+        if (w > 520) C.text(ctx, '요청마다 CPU는 몇백 µs, 나머지는 DB 응답 대기', w, 11, { size: 10, align: 'right', base: 'middle' });
         [0, 1].forEach((side) => {
           const x = side * (pw + 12), y = 34;
-          C.group(ctx, x, y, pw, 250, side ? 'B. 커널에 맡기고 하나가 수거' : 'A. 요청마다 스레드가 기다림', y + 18);
+          C.group(ctx, x, y, pw, 250, side ? 'B. epoll에 등록하고 하나로 받음' : 'A. 요청마다 스레드가 대기', y + 18);
           ctx.save();
           ctx.setLineDash([4, 4]);
           C.line(ctx, [[x + 8, y + 152], [x + pw - 8, y + 152]], '#cbd5e1', 1);
@@ -656,12 +656,12 @@
           if (!side) {
             cells(ctx, x + 12, y + 32, pw - 24, 86, 12, 4, share, '#fff', '#94a3b8');
             C.text(ctx, '전부 read에서 대기', x + 12, y + 136, { size: 11, weight: 600, color: U.tones.bad[1], base: 'middle' });
-            C.card(ctx, { x: x + 10, y: y + 176, w: pw - 20, h: 62, t: `소켓 ${num}개`, s: '스레드가 하나씩 붙어 기다림' }, { fill: '#fef2f2', stroke: '#fca5a5', dash: [4, 3] });
+            C.card(ctx, { x: x + 10, y: y + 176, w: pw - 20, h: 62, t: `소켓 ${num}개`, s: '스레드가 하나씩 붙어 대기' }, { fill: '#fef2f2', stroke: '#fca5a5', dash: [4, 3] });
           } else {
             const bwid = Math.min(160, pw - 32);
             C.card(ctx, { x: x + (pw - bwid) / 2, y: y + 44, w: bwid, h: 50, t: '메인 스레드', s: '1개' }, { fill: JSFILL, stroke: JSLINE });
             C.arrow(ctx, [[x + pw / 2, y + 94], [x + pw / 2, y + 120]], 1, '#94a3b8');
-            C.text(ctx, pw > 240 ? 'epoll_wait 한 번으로 전부 기다림' : 'epoll_wait 한 번', x + 12, y + 136, { size: 11, weight: 600, color: U.tones.ok[1], base: 'middle' });
+            C.text(ctx, pw > 240 ? 'epoll_wait 한 번으로 전부 대기' : 'epoll_wait 한 번', x + 12, y + 136, { size: 11, weight: 600, color: U.tones.ok[1], base: 'middle' });
             C.card(ctx, { x: x + 10, y: y + 176, w: pw - 20, h: 62, t: '' });
             C.text(ctx, 'epoll 감시 목록', x + 20, y + 190, { size: 11, weight: 600, color: U.text, base: 'middle' });
             if (pw > 240) C.text(ctx, `fd ${num}개`, x + pw - 20, y + 190, { size: 10, align: 'right', base: 'middle' });
@@ -765,7 +765,7 @@
       return { reqs, main };
     };
     const phases = [
-      { mode: 'light', pill: '기다림은 커널에 맡김', tone: 'ok', note: '요청마다 JS는 1ms만 돈다. DB를 기다리는 동안 메인 스레드는 비어 있어서 다른 요청을 바로 받는다.' },
+      { mode: 'light', pill: '대기는 커널이 맡음', tone: 'ok', note: '요청마다 JS는 1ms만 돈다. DB를 기다리는 동안 메인 스레드는 비어 있어서 다른 요청을 바로 받는다.' },
       { mode: 'block', pill: '무거운 계산이 루프를 막음', tone: 'bad', note: '무거운 계산 하나가 메인 스레드를 30ms 잡으면, DB 응답이 와 있어도 꺼내 갈 수 없어 모든 요청이 같이 늦어진다.' },
       { mode: 'split', pill: '무거운 계산을 쪼갬', tone: 'info', note: '계산을 5ms씩 쪼개 중간에 차례를 넘기면 다른 요청이 오래 막히지 않는다. 대신 무거운 요청은 조금 늦게 끝난다.' },
     ].map((p) => ({ ...p, ...plan(p.mode) }));
@@ -782,7 +782,7 @@
         C.pill(ctx, 0, 0, p.pill, p.tone);
         C.text(ctx, 'JS를 돌리는 메인 스레드 1개', w, 11, { size: 10, align: 'right', base: 'middle' });
         const wide = w > 520;
-        C.legend(ctx, 0, 44, [['JS 실행', U.blue], ['무거운 계산', HEAVY], [wide ? 'DB 응답 기다림 (커널)' : 'DB 기다림', IO], [wide ? '메인 스레드 차례 기다림' : '차례 기다림', C.hatch(ctx, U.red)]]);
+        C.legend(ctx, 0, 44, [['JS 실행', U.blue], ['무거운 계산', HEAVY], [wide ? 'DB 응답 대기 (커널)' : 'DB 대기', IO], [wide ? '메인 스레드 차례 대기' : '차례 대기', C.hatch(ctx, U.red)]]);
         ctx.fillStyle = U.cell;
         ctx.fillRect(x0, 66, x1 - x0, 24);
         C.text(ctx, '메인 스레드', x0 - 8, 78, { size: 10, weight: 600, color: U.text, align: 'right', base: 'middle' });
@@ -1126,7 +1126,7 @@
             C.box(ctx, sx, sy, sw, 50, { fill: '#fff', stroke: state === 'run' ? COL[i] : U.grid });
             C.text(ctx, `vCPU ${i}`, sx + 6, sy + 11, { size: 9 });
             tag(ctx, k, sx + sw / 2, sy + 20, TH[k], { h: 18 });
-            C.text(ctx, { run: '계산 중', wait: '메모리 기다림', ready: '차례 기다림' }[state], sx + sw / 2, sy + 40, { size: 9, color: state === 'run' ? COL[i] : U.muted, align: 'center', base: 'middle' });
+            C.text(ctx, { run: '계산 중', wait: '메모리 대기', ready: '차례 대기' }[state], sx + sw / 2, sy + 40, { size: 9, color: state === 'run' ? COL[i] : U.muted, align: 'center', base: 'middle' });
           });
           const ex = 10, ey = sy + 60, ew = cw - 20, own = step.id;
           C.box(ctx, ex, ey, ew, 38, { fill: own >= 0 ? TH['AB'[own]][0] : U.cell, stroke: own >= 0 ? COL[own] : '#cbd5e1' });
@@ -1165,8 +1165,8 @@
       });
     });
     const OFF = { n: 1, mem: true, note: '끄면 A가 메모리를 기다리는 동안 실행 장치가 IDLE이다' };
-    const ON = { n: 2, mem: true, note: '켜면 A가 기다리는 틈에 B가 계산해서 IDLE 칸이 줄어든다' };
-    htFig(document.querySelectorAll('[data-figure="cpu-ht"]'), [OFF, ON, { n: 2, mem: false, note: '계산만 하는 일은 채울 틈이 없다. A와 B가 실행 장치 하나를 나눠 쓴다' }]);
+    const ON = { n: 2, mem: true, note: '켜면 A가 메모리를 기다리는 동안 B가 계산해서 IDLE 칸이 줄어든다' };
+    htFig(document.querySelectorAll('[data-figure="cpu-ht"]'), [OFF, ON, { n: 2, mem: false, note: '계산만 하는 일은 메모리를 기다리는 시간이 없다. A와 B가 실행 장치 하나를 두고 다툰다' }]);
   }
 
   // Group: CFS run queue, CPU usage cells (own helpers in this block).
