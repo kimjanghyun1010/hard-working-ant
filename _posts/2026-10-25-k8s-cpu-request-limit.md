@@ -141,9 +141,8 @@ CPU는 명령 하나를 1ns보다 짧게 처리하지만, 메모리에서 데이
 | 레지스터 | 저장했다가 다시 불러온다 | vCPU마다 한 벌씩 따로 있다 |
 | 바꾸는 비용 | 수 µs | 거의 없다 |
 
-하이퍼스레딩 환경에서는 CPU 사용률 %로 실행 장치가 실제로 얼마나 바쁜지 알 수 없다. 사용률은 vCPU에 스레드가 올라가 있던 시간이라, 같은 코어의 두 vCPU가 모두 100%여도 실행 장치는 메모리를 기다리며 비어 있을 수 있다.
-
-실제 코어가 얼마나 찼는지는 하드웨어 성능 카운터의 Top-down 지표(Retiring, Bad Speculation, Frontend Bound, Backend Bound)와 SMT 활용률로 본다. 리눅스에서는 `perf stat`으로 확인할 수 있다.
+하이퍼스레딩 환경에서 CPU 사용률 %는 실제 코어 포화도를 제대로 보여 주지 못한다.
+코어 포화도는 하드웨어 성능 카운터의 Top-down 지표(Retiring, Bad Speculation, Frontend Bound, Backend Bound)와 SMT 활용률로 본다. 리눅스에서는 `perf stat`으로 확인할 수 있다.
 
 ## CFS와 CPU 사용률
 
