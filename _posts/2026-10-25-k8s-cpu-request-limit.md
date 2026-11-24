@@ -141,28 +141,9 @@ CPU는 명령 하나를 1ns보다 짧게 처리하지만, 메모리에서 데이
 | 레지스터 | 저장했다가 다시 불러온다 | vCPU마다 한 벌씩 따로 있다 |
 | 바꾸는 비용 | 수 µs | 거의 없다 |
 
-하이퍼스레딩 환경에서는 CPU 사용률 %로 실행 장치가 실제로 얼마나 바쁜지 알 수 없다. 사용률은 vCPU에 스레드가 올라가 있던 시간이라, 같은 코어의 두 vCPU가 모두 100%여도 실행 장치는 메모리를 기다리며 비어 있을 수 있다. 반대로 사용률이 낮아도 실행 장치는 이미 다 쓰이고 있을 수 있다.
+하이퍼스레딩 환경에서는 CPU 사용률 %로 실행 장치가 실제로 얼마나 바쁜지 알 수 없다. 사용률은 vCPU에 스레드가 올라가 있던 시간이라, 같은 코어의 두 vCPU가 모두 100%여도 실행 장치는 메모리를 기다리며 비어 있을 수 있다.
 
-실행 장치가 어떻게 쓰였는지는 하드웨어 성능 카운터(PMU)로 본다. 코어는 사이클마다 명령을 정해진 개수만큼 넣을 수 있고, 이 칸을 슬롯이라 한다. Top-down 분석은 슬롯이 어디에 쓰였는지 넷으로 나눈다.
-
-- Retiring: 끝까지 실행된 명령에 쓴 슬롯. 높으면 명령이 막힘 없이 처리되고 있다.
-- Bad Speculation: 분기 예측이 틀려 버려진 슬롯.
-- Frontend Bound: 명령을 가져오고 해석하지 못해 빈 슬롯. 코드가 클 때 늘어난다.
-- Backend Bound: 메모리나 실행 장치를 기다려 빈 슬롯. 메모리 대기(Memory Bound)와 실행 장치 부족(Core Bound)으로 다시 나뉜다.
-
-SMT 활용률은 같은 코어의 두 vCPU가 같은 사이클에 함께 돈 비율이다. Top-down 비율과 함께 보면 어디를 고칠지 알 수 있다.
-
-- Memory Bound가 높다: 메모리를 기다리는 시간이 많아 하이퍼스레딩 이득이 크다. 데이터를 작게 만들고 메모리 접근을 줄인다.
-- Core Bound나 Retiring이 높고 SMT 활용률도 높다: 두 vCPU가 실행 장치를 두고 다툰다. 계산이 큰 Pod는 kubelet CPU Manager의 `full-pcpus-only` 옵션으로 물리 코어 단위로 받게 한다.
-
-```bash
-# Top-down 1단계 비율 (노드 전체, 10초)
-perf stat -M TopdownL1 -a -- sleep 10
-# 이 CPU에서 쓸 수 있는 SMT 지표 이름 찾기 (예: smt_2t_utilization)
-perf list metric 2>/dev/null | grep -i smt
-```
-
-지표 이름은 CPU 제조사와 perf 버전마다 다르다. 가상 머신에서는 PMU 카운터가 막혀 있거나 일부만 보일 수 있고, 컨테이너 안에서는 `perf_event_paranoid` 권한도 필요하다.
+실제 코어가 얼마나 찼는지는 하드웨어 성능 카운터의 Top-down 지표(Retiring, Bad Speculation, Frontend Bound, Backend Bound)와 SMT 활용률로 본다. 리눅스에서는 `perf stat`으로 확인할 수 있다.
 
 ## CFS와 CPU 사용률
 
@@ -615,7 +596,6 @@ node --cpu-prof app.js   # 종료할 때 CPU.*.cpuprofile 파일이 생긴다
 - [Linux kernel — CFS Bandwidth Control](https://docs.kernel.org/scheduler/sched-bwc.html)
 - [Linux kernel — Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
 - [perf-stat(1)](https://man7.org/linux/man-pages/man1/perf-stat.1.html)
-- [Kubernetes — Control CPU Management Policies on the Node](https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/)
 - [Node.js — Don't Block the Event Loop](https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop)
 - [libuv — Thread pool work scheduling](https://docs.libuv.org/en/v1.x/threadpool.html)
 - [Node.js — worker_threads](https://nodejs.org/api/worker_threads.html)
