@@ -443,7 +443,7 @@ limit은 컨테이너 안 모든 스레드가 쓴 시간을 합쳐서 잰다. �
 - request는 실제 사용량을 재서 잡는다.
 - limit을 건다면 여유 있게 두고 쓰로틀 비율을 같이 본다.
 
-메모리 쪽(힙 상한, OOMKilled)은 [원글](https://kimjanghyun1010.tistory.com/118)에 따로 정리해 뒀다.
+메모리 쪽(힙 상한, OOMKilled)은 [메모리 이해하기]({{ site.baseurl }}{% post_url 2026-10-26-memory %})에 정리했다.
 
 ### 직렬화와 CPU
 
