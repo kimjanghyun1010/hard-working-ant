@@ -269,6 +269,7 @@ Prometheus Operator를 쓰면 같은 내용을 `Probe` 리소스로 적는다. �
 
 알림 규칙은 PromQL 조건 하나와 `for` 하나다. Prometheus는 규칙을 `evaluation_interval`(기본 1분)마다 평가한다. 조건이 처음 참이 되면 pending, `for` 동안 계속 참이면 firing이 되어 Alertmanager로 간다.
 
+{% raw %}
 ```yaml
 groups:
   - name: api
@@ -283,6 +284,7 @@ groups:
         annotations:
           summary: "오류율 {{ $value | humanizePercentage }}"
 ```
+{% endraw %}
 
 아래 데모는 30분 동안 오류율이 2분 튄 뒤 10분짜리 장애가 오는 상황이다. 모드를 바꿔 가며 Slack 줄에 알림이 몇 개 쌓이는지, 장애 알림이 언제 오는지 본다.
 
