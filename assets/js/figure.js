@@ -17,11 +17,12 @@ hwa.steps = (time, n, step, hold) => {
 };
 
 const FONT = 'Inter, "Noto Sans KR", system-ui, sans-serif';
+// Flat palette: grey base, one strong colour per meaning (blue main, purple secondary, green ok, orange wait, red limit).
 hwa.ui = {
-  text: '#374151', muted: '#6b7280', grid: '#e5e7eb', plot: '#f8fafc', cell: '#f1f5f9', now: '#94a3b8',
-  blue: '#3b82f6', purple: '#8b5cf6', red: '#ef4444', slate: '#64748b',
-  accent: '#4f46e5', accentSoft: '#eef2ff', accentLine: '#a5b4fc',
-  tones: { ok: ['#dcfce7', '#15803d'], warn: ['#fef3c7', '#b45309'], bad: ['#fee2e2', '#dc2626'], info: ['#dbeafe', '#1d4ed8'] },
+  text: '#495057', strong: '#343a40', muted: '#868e96', grid: '#dee2e6', plot: '#f8f9fa', cell: '#f1f3f5', now: '#adb5bd',
+  blue: '#228be6', purple: '#7950f2', red: '#fa5252', slate: '#868e96', green: '#40c057', orange: '#fd7e14',
+  accent: '#1c7ed6', accentSoft: '#e7f5ff', accentLine: '#74c0fc',
+  tones: { ok: ['#ebfbee', '#2f9e44'], warn: ['#fff4e6', '#e8590c'], bad: ['#fff5f5', '#e03131'], info: ['#e7f5ff', '#1971c2'] },
   font: (size, weight = 400) => `${weight} ${size}px ${FONT}`,
 };
 
@@ -143,20 +144,19 @@ cv.wrap = (ctx, s, cx, y, maxW, opts = {}) => {
   if (line) lines.push(line);
   lines.forEach((l, i) => cv.text(ctx, l, cx, y + i * 17, { size: 12, weight: 500, ...opts, align: 'center' }));
 };
-cv.pill = (ctx, x, y, s, tone) => {
+// Figure title at the top left: small bold dark text, the way a dashboard panel names itself.
+cv.pill = (ctx, x, y, s) => cv.text(ctx, s, x, y + 11.5, { size: 11, weight: 700, color: hwa.ui.strong, base: 'middle' });
+// Status chip: a small filled pill for a state ("이상 없음", "쓰로틀 발생").
+cv.tag = (ctx, x, y, s, tone = 'info') => {
   const [bg, fg] = hwa.ui.tones[tone];
-  ctx.font = hwa.ui.font(11, 600);
-  const w = ctx.measureText(s).width + 30;
+  ctx.font = hwa.ui.font(10, 700);
+  const w = ctx.measureText(s).width + 16;
   ctx.beginPath();
-  ctx.roundRect(x, y, w, 22, 11);
+  ctx.roundRect(x, y, w, 20, 10);
   ctx.fillStyle = bg;
   ctx.fill();
-  ctx.beginPath();
-  ctx.arc(x + 12, y + 11, 3.5, 0, Math.PI * 2);
-  ctx.strokeStyle = fg;
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  cv.text(ctx, s, x + 21, y + 11.5, { weight: 600, color: fg, base: 'middle' });
+  cv.text(ctx, s, x + 8, y + 10.5, { size: 10, weight: 700, color: fg, base: 'middle' });
+  return w;
 };
 cv.legend = (ctx, x, y, items) => {
   let cx = x;
@@ -254,21 +254,18 @@ cv.event = (ctx, x, y0, y1, label, color = hwa.ui.red, align = 'center') => {
 cv.stamp = (ctx, cx, cy, s, tone = 'bad', k = 1) => {
   if (k <= 0) return;
   const [bg, fg] = hwa.ui.tones[tone];
-  ctx.font = hwa.ui.font(13, 700);
-  const w = ctx.measureText(s).width + 28;
+  ctx.font = hwa.ui.font(12, 700);
+  const w = ctx.measureText(s).width + 24;
   ctx.save();
   ctx.globalAlpha = Math.min(1, k);
-  ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
-  ctx.shadowBlur = 10;
   ctx.beginPath();
-  ctx.roundRect(cx - w / 2, cy - 15, w, 30, 15);
+  ctx.roundRect(cx - w / 2, cy - 13, w, 26, 13);
   ctx.fillStyle = bg;
   ctx.fill();
-  ctx.shadowBlur = 0;
   ctx.strokeStyle = fg;
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = 1;
   ctx.stroke();
-  cv.text(ctx, s, cx, cy + 0.5, { size: 13, weight: 700, color: fg, align: 'center', base: 'middle' });
+  cv.text(ctx, s, cx, cy + 0.5, { size: 12, weight: 700, color: fg, align: 'center', base: 'middle' });
   ctx.restore();
 };
 

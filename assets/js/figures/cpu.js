@@ -1,6 +1,6 @@
 (() => {
   const U = hwa.ui, C = hwa.cv;
-  const JSFILL = '#eff6ff', JSLINE = '#93c5fd';
+  const JSFILL = '#e7f5ff', JSLINE = '#74c0fc';
 
   // request on a 1 vCPU node: one server alone, then two servers at the same rate, swept up to 1000m each.
   // Line: share of the CPU each server wanted but did not get. Both servers: request 500m, limit 1000m.
@@ -8,7 +8,7 @@
     const TAU = Math.PI * 2;
     const W = 10, PER = 100, DT = 0.5, ARR = 4, SHOW = 1, CAP = 6000;
     // Light fill on the clock and the map, strong colour for the line and the numbers.
-    const TONE = { A: ['#93c5fd', U.blue], B: ['#fca5a5', U.red] };
+    const TONE = { A: ['#74c0fc', U.blue], B: ['#ffa8a8', U.red] };
 
     const arrivals = (n, seed) => {
       const a = [];
@@ -61,14 +61,14 @@
         }
         k = e;
       }
-      ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.strokeStyle = '#cbd5e1'; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.strokeStyle = '#ced4da'; ctx.stroke();
       const an = -Math.PI / 2 + ((m - p0) / PER) * TAU;
       C.line(ctx, [[cx, cy], [cx + Math.cos(an) * R, cy + Math.sin(an) * R]], U.text, 1.8);
     };
     const user = (ctx, x, y, w, h) => {
       C.box(ctx, x, y, w, h, { fill: '#fff', r: 8 });
       const cx = x + w / 2, cy = y + h / 2;
-      ctx.fillStyle = '#94a3b8';
+      ctx.fillStyle = '#adb5bd';
       ctx.beginPath(); ctx.arc(cx, cy - 7, 5.5, 0, TAU); ctx.fill();
       ctx.beginPath(); ctx.ellipse(cx, cy + 8, 9, 6, 0, Math.PI, 0); ctx.fill();
     };
@@ -108,7 +108,7 @@
           const px = 34, py = wide ? 86 : 136, pw = w - px - 8, ph = h - py - 34, maxX = 100;
           const Y = C.panel(ctx, px, py, pw, ph, { title: '', max: 100, ticks: [[0, '0%'], [50, '50%'], [100, '100%']] });
           const X = (rps) => px + (rps / maxX) * pw;
-          C.dashed(ctx, X(50), py, X(50), py + ph, '#cbd5e1');
+          C.dashed(ctx, X(50), py, X(50), py + ph, '#ced4da');
           C.text(ctx, 'request 500m', X(50) - 4, py + 12, { size: 9, align: 'right' });
           C.text(ctx, 'limit 1000m', X(100) - 4, py + 12, { size: 9, align: 'right' });
           // B is dashed on top of A, so both stay visible where the two lines meet.
@@ -133,10 +133,10 @@
       ids: ['A'], stamp: ['초당 100까지 0%', 'ok'], notes: ['혼자면 vCPU를 다 써서, 초당 100까지 원하는 CPU를 모두 받는다.'],
       map: (ctx, rps) => {
         user(ctx, 0, 6, 46, 46);
-        C.arrow(ctx, [[48, 29], [74, 29]], 1, '#cbd5e1');
+        C.arrow(ctx, [[48, 29], [74, 29]], 1, '#ced4da');
         C.text(ctx, `${rps}/s`, 61, 20, { size: 10, weight: 600, color: U.text, align: 'center' });
         server(ctx, 76, 6, 64, 46, 'A');
-        C.arrow(ctx, [[142, 29], [158, 29]], 1, '#cbd5e1');
+        C.arrow(ctx, [[142, 29], [158, 29]], 1, '#ced4da');
         C.box(ctx, 160, 0, 112, 58, { fill: '#fff', r: 10 });
         C.text(ctx, 'vCPU 1개', 168, 14, { size: 9 });
         return 246;
@@ -147,13 +147,13 @@
       ids: ['A', 'B'], stamp: ['둘 다 50% 못 씀', 'bad'], notes: ['둘이면 초당 50(request 500m)부터 둘 다 원하는 CPU를 못 받는다.'],
       map: (ctx, rps) => {
         user(ctx, 0, 6, 46, 46);
-        C.arrow(ctx, [[48, 29], [56, 29], [56, 15], [74, 15]], 1, '#cbd5e1');
-        C.arrow(ctx, [[56, 29], [56, 43], [74, 43]], 1, '#cbd5e1');
+        C.arrow(ctx, [[48, 29], [56, 29], [56, 15], [74, 15]], 1, '#ced4da');
+        C.arrow(ctx, [[56, 29], [56, 43], [74, 43]], 1, '#ced4da');
         C.text(ctx, `${rps}/s`, 23, 66, { size: 10, weight: 600, color: U.text, align: 'center' });
         server(ctx, 76, 3, 64, 24, 'A');
         server(ctx, 76, 31, 64, 24, 'B');
-        C.arrow(ctx, [[142, 15], [150, 15], [150, 29], [158, 29]], 1, '#cbd5e1');
-        C.line(ctx, [[142, 43], [150, 43], [150, 29]], '#cbd5e1', 1);
+        C.arrow(ctx, [[142, 15], [150, 15], [150, 29], [158, 29]], 1, '#ced4da');
+        C.line(ctx, [[142, 43], [150, 43], [150, 29]], '#ced4da', 1);
         C.box(ctx, 160, 0, 112, 58, { fill: '#fff', r: 10 });
         C.text(ctx, 'vCPU 1개', 168, 14, { size: 9 });
         return 246;
@@ -215,8 +215,8 @@
 
   // Group: timeline figures. Lanes on a time axis, blocks for CPU work, labelled arrows for waits.
   {
-    const FILL = { cpu: U.blue, cpu2: '#8b5cf6', db: '#64748b', heavy: '#f59e0b', sw: U.red, s1: '#3b82f6', s2: '#8b5cf6', s3: '#14b8a6', s4: '#f59e0b' };
-    const ARC = { wait: '#94a3b8', idle: '#cbd5e1', thr: U.red, late: U.red };
+    const FILL = { cpu: U.blue, cpu2: U.purple, db: '#868e96', heavy: U.orange, sw: U.red, s1: U.blue, s2: U.purple, s3: '#12b886', s4: U.orange };
+    const ARC = { wait: '#adb5bd', idle: '#ced4da', thr: U.red, late: U.red };
     const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
     const dbl = (ctx, x0, x1, y, color) => {
       if (x1 - x0 < 6) return;
@@ -264,6 +264,13 @@
           (s.arcs || []).forEach(([j, a, b, kind, label]) => {
             if (t <= a) return;
             const y = ly(j) + LH / 2, xe = X(Math.min(t, b));
+            // Throttled time is a hatched red block, labelled by a small chip once it is complete.
+            if (kind === 'thr') {
+              const by = ly(j) + 8, bx = X(a) + 1, bw = xe - bx - 1;
+              if (bw > 0) { ctx.fillStyle = '#fff5f5'; ctx.fillRect(bx, by, bw, LH - 16); ctx.fillStyle = C.hatch(ctx, '#fa5252'); ctx.fillRect(bx, by, bw, LH - 16); }
+              if (t >= b && label && tw(ctx, label, 10, 700) + 16 < X(b) - X(a)) { ctx.font = U.font(10, 700); C.tag(ctx, (X(a) + X(b)) / 2 - (ctx.measureText(label).width + 16) / 2, y - 10, label, 'bad'); }
+              return;
+            }
             dbl(ctx, X(a) + 2, xe - 2, y, ARC[kind]);
             if (t >= b && label && tw(ctx, label, 9, 600) < X(b) - X(a)) C.text(ctx, label, (X(a) + X(b)) / 2, y + 13, { size: 9, weight: 600, color: ARC[kind], align: 'center' });
           });
@@ -271,7 +278,7 @@
             if (t <= a) return;
             const y = ly(j) + 8, bx = X(a) + 1, bw = X(Math.min(t, b)) - bx - 1;
             if (bw <= 0) return;
-            ctx.beginPath(); ctx.roundRect(bx, y, bw, LH - 16, Math.min(8, bw / 2)); ctx.fillStyle = FILL[kind]; ctx.fill();
+            ctx.beginPath(); ctx.roundRect(bx, y, bw, LH - 16, Math.min(3, bw / 2)); ctx.fillStyle = FILL[kind]; ctx.fill();
             if (t >= b && label && tw(ctx, label, 10, 700) + 8 < bw) C.text(ctx, label, bx + bw / 2, y + (LH - 16) / 2 + 0.5, { size: 10, weight: 700, color: '#fff', align: 'center', base: 'middle' });
           });
           (s.below || []).forEach(([a, b, label]) => {
@@ -339,11 +346,6 @@
       { pill: 'limit 1000m', tone: 'bad', span: 300, lanes: ['작업 1', '작업 2'], ticks: bt, below: per, segs: [[0, 0, 20, 'cpu', ''], [0, 100, 150, 'cpu', '50ms'], [1, 100, 150, 'cpu2', '50ms'], [0, 200, 230, 'cpu', ''], [1, 200, 230, 'cpu2', '']], arcs: [[0, 150, 200, 'thr', '쓰로틀'], [1, 150, 200, 'thr', '쓰로틀']], event: [100, '요청 몰림'], stamp: ['130ms 만에 끝남', 'bad'], say: '몰린 일을 두 작업이 나눠 50ms 만에 쿼터를 다 쓰고, 50ms 멈췄다가 다음 주기에 마저 끝낸다.' },
       { pill: 'limit 없음', tone: 'ok', span: 300, lanes: ['작업 1', '작업 2'], ticks: bt, below: per, segs: [[0, 0, 20, 'cpu', ''], [0, 100, 180, 'cpu', '80ms'], [1, 100, 180, 'cpu2', '80ms']], event: [100, '요청 몰림'], stamp: ['80ms 만에 끝남', 'ok'], say: '쿼터가 없으면 두 작업이 80ms 동안 쉬지 않고 돌아 같은 일을 80ms에 끝낸다.' },
     ], { demo: { modes: ['limit 1000m', 'limit 없음'], run: '요청 몰리게 하기' } });
-    // One query: the main thread runs a little JS, serves other requests while the DB works, then runs the callback.
-    tl('cpu-request-flow', [
-      { pill: '쿼리 한 건', tone: 'info', span: 30, lanes: ['JS 메인', 'DB'], ticks: [[10, '10ms'], [20, '20ms'], [30, '30ms']], legend: [['cpu', '요청 A'], ['cpu2', '다른 요청']], segs: [[0, 0, 2, 'cpu', ''], [0, 8, 10, 'cpu2', ''], [0, 15, 17, 'cpu2', ''], [1, 3, 24, 'db', 'A 쿼리'], [0, 26, 28.5, 'cpu', '']], arcs: [[0, 2, 8, 'idle', ''], [0, 17, 26, 'idle', '대기']], event: [24, 'DB 응답'], stamp: ['A가 쓴 CPU 4.5ms', 'ok'], say: 'A가 DB를 기다리는 동안 메인 스레드는 다른 요청을 처리하고, 응답이 오면 콜백만 짧게 돈다.' },
-    ], { SEC: 6 });
-
     // Short requests leave the vCPU idle between them; streams split it.
     const shortReq = Array.from({ length: 10 }, (_, j) => [0, j * 10 + 2, j * 10 + 4, j % 2 ? 'cpu2' : 'cpu', '']);
     const streams = Array.from({ length: 10 }, (_, j) => [0, j * 10, j * 10 + 10, `s${(j % 4) + 1}`, `${(j % 4) + 1}`]);
@@ -425,15 +427,15 @@
           PHASES.forEach((p, i) => {
             ctx.beginPath();
             ctx.roundRect(x, L.y + 36, chips[i], 17, 8);
-            ctx.fillStyle = p === phase ? '#eef2ff' : U.cell;
+            ctx.fillStyle = p === phase ? '#e7f5ff' : U.cell;
             ctx.fill();
-            C.text(ctx, p, x + chips[i] / 2, L.y + 45, { size: 10, weight: 600, color: p === phase ? '#4338ca' : U.muted, align: 'center', base: 'middle' });
+            C.text(ctx, p, x + chips[i] / 2, L.y + 45, { size: 10, weight: 600, color: p === phase ? '#1971c2' : U.muted, align: 'center', base: 'middle' });
             x += chips[i] + 4;
           });
-        } else C.text(ctx, `${phase} 단계`, L.x + L.w / 2, L.y + 45, { size: 10, weight: 600, color: '#4338ca', align: 'center', base: 'middle' });
+        } else C.text(ctx, `${phase} 단계`, L.x + L.w / 2, L.y + 45, { size: 10, weight: 600, color: '#1971c2', align: 'center', base: 'middle' });
         ctx.save();
         ctx.setLineDash([4, 4]);
-        C.line(ctx, [[0, 146], [R, 146]], '#cbd5e1', 1);
+        C.line(ctx, [[0, 146], [R, 146]], '#ced4da', 1);
         ctx.restore();
         C.text(ctx, '커널', 0, 162, { weight: 600 });
         ['epoll', 'sock'].forEach((k) => C.card(ctx, B[k], { lit: lit.has(k), fill: U.cell }));
@@ -444,13 +446,78 @@
         sc.steps.forEach((s, i) => {
           if (i > cur) return;
           const pts = P[`${s[0]}>${s[1]}`], on = i === cur;
-          C.arrow(ctx, pts, on ? f : 1, on ? U.accent : '#cbd5e1', { width: on ? 2 : 1.5 });
+          C.arrow(ctx, pts, on ? f : 1, on ? U.accent : '#ced4da', { width: on ? 2 : 1.5 });
           const key = `${s[0]}>${s[1]}`;
           C.badge(ctx, pts, i + 1, on, { 'v8>bind': 'down', 'bind>pool': 'left', 'v8>gc': 'left' }[key], key === 'v8>bind' ? 0.25 : 0.5);
         });
         C.text(ctx, `${cur + 1}. ${step[2]}`, 0, 332, { size: 12, weight: 600, color: U.text, base: 'middle' });
         C.wrap(ctx, sc.note, w / 2, 360, w - 20, { color: U.tones[sc.tone][1] });
         say(`${sc.pill}: ${sc.note}`);
+      },
+    });
+  });
+  // One DB query as a sequence: the JS thread works only at the two ends and sleeps in epoll_wait in between.
+  document.querySelectorAll('[data-figure="cpu-request-flow"]').forEach((root) => {
+    const SEC = 7, HOLD = 1.8, Y0 = 102, Y1 = 352;
+    const lanes = [['JS 스레드', '이벤트 루프'], ['epoll', '감시 목록'], ['소켓', '송수신 큐'], ['MySQL', ':3306']];
+    const acts = [[0, 108, 146, 'run'], [2, 120, 146], [3, 140, 256], [1, 168, 304, 'watch'], [0, 176, 296, 'sleep'], [2, 256, 286], [0, 312, 346, 'run']];
+    const arrows = [[0, 2, 124, 'write(21, 쿼리)'], [2, 3, 140, '쿼리 전송'], [0, 1, 164, 'epoll_wait'], [3, 2, 256, '응답 패킷', 'dash'], [2, 1, 280, 'fd 21 준비됨'], [1, 0, 304, 'wake_up', 'wake']];
+    const steps = [
+      ['① 보냄', 108, 160, '쿼리를 write(21)로 소켓에 쓰고, 기다리지 않고 바로 돌아온다.'],
+      ['② 대기', 160, 256, 'epoll_wait를 부르고 대기한다. 대기하는 동안 CPU를 하나도 안 쓴다.'],
+      ['③ 도착', 256, 296, '응답이 오면 커널이 수신 큐에 넣고 fd 21을 준비됨으로 올린다.'],
+      ['④ 깨움', 296, 312, 'epoll이 대기 중인 메인 스레드를 깨운다.'],
+      ['⑤ 콜백', 312, 352, 'read(21)로 응답을 가져와 콜백을 실행한다.'],
+    ];
+    hwa.scene(root, {
+      height: 402,
+      still: SEC,
+      frame: (ctx, w, h, time, say) => {
+        const y = Y0 + (Y1 - Y0) * hwa.loop(time, SEC, HOLD).k;
+        const x0 = 52, lw = (w - x0) / 4, LX = (i) => x0 + lw * (i + 0.5), m = lw < 90 ? 3 : 8;
+        const found = steps.findIndex((s) => y < s[2]), si = found < 0 ? steps.length - 1 : found;
+        C.pill(ctx, 0, 0, steps[si][0], si === 1 ? 'ok' : 'info');
+        C.text(ctx, 'DB 쿼리 한 건, 커넥션 fd 21', w, 11, { size: 10, align: 'right', base: 'middle' });
+        C.group(ctx, LX(1) - lw / 2 + 4, 30, lw * 2 - 8, 330, '커널', 45);
+        lanes.forEach(([t, s], i) => {
+          C.card(ctx, { x: LX(i) - lw / 2 + m, y: 54, w: lw - 2 * m, h: 40, t, s, size: lw < 90 ? 11 : 12 }, { fill: i === 0 ? JSFILL : '#fff', stroke: i === 0 ? JSLINE : U.grid });
+          ctx.save();
+          ctx.setLineDash([3, 4]);
+          C.line(ctx, [[LX(i), 94], [LX(i), 356]], '#ced4da', 1);
+          ctx.restore();
+        });
+        steps.forEach(([label, a, b], i) => C.text(ctx, label, 0, (a + b) / 2, { size: 11, weight: i === si ? 700 : 500, color: i === si ? U.accent : i < si ? U.text : '#ced4da', base: 'middle' }));
+        acts.forEach(([lane, a, b, kind]) => {
+          if (a >= y) return;
+          const e = Math.min(b, y), x = LX(lane);
+          if (kind === 'sleep') {
+            const sw = Math.min(lw - 12, 76);
+            ctx.fillStyle = U.cell;
+            ctx.fillRect(x - sw / 2, a, sw, e - a);
+            if (e - a > 44) {
+              C.text(ctx, '대기', x, a + (e - a) / 2 - 8, { size: 11, weight: 700, color: U.muted, align: 'center', base: 'middle' });
+              C.text(ctx, 'CPU 0', x, a + (e - a) / 2 + 9, { size: 10, color: U.muted, align: 'center', base: 'middle' });
+            }
+            return;
+          }
+          ctx.fillStyle = kind === 'run' ? U.blue : kind === 'watch' ? '#e9ecef' : '#fff';
+          ctx.fillRect(x - 6, a, 12, e - a);
+          ctx.strokeStyle = kind === 'run' ? U.blue : '#adb5bd';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x - 5.5, a + 0.5, 11, Math.max(0, e - a - 1));
+        });
+        arrows.forEach(([from, to, ay, label, style]) => {
+          const k = Math.max(0, Math.min(1, (y - ay) / 14));
+          if (!k) return;
+          const dir = Math.sign(LX(to) - LX(from)), color = style === 'wake' ? U.blue : '#868e96';
+          C.arrow(ctx, [[LX(from) + dir * 7, ay], [LX(to) - dir * 7, ay]], k, color, { dash: style === 'dash' ? [4, 3] : null });
+          ctx.globalAlpha = k;
+          C.text(ctx, label, (LX(from) + LX(to)) / 2, ay - 7, { size: 10, color: style === 'wake' ? U.blue : U.text, align: 'center' });
+          ctx.globalAlpha = 1;
+        });
+        C.dashed(ctx, x0 - 6, y, w, y, '#a5d8ff');
+        C.wrap(ctx, steps[si][3], w / 2, 380, w - 20, { color: U.text });
+        say(steps[si][3]);
       },
     });
   });
