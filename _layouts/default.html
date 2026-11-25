@@ -17,6 +17,9 @@
 <script src="{{ '/assets/js/' | append: s | relative_url }}?v={{ v }}" defer></script>
 {%- endfor %}
 {%- endif %}
+{%- if site.goatcounter %}
+<script data-goatcounter="https://{{ site.goatcounter }}.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+{%- endif %}
 </head>
 <body data-search="{{ '/search.json' | relative_url }}">
 <header class="site-header">
