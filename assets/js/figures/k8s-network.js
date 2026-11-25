@@ -625,8 +625,8 @@
         }));
         C.text(ctx, 'TCP 179', (rx + rw + wx) / 2, RY[0] + H / 2 - 8,{ size: 9, weight: 600, color: PURPLE[1], align: 'center' });
         const learned = i === 2 || (i === 1 && t > 3.6);
-        RY.forEach((y, a) => C.card(ctx, { x: rx, y, w: rw, h: H, t: `라우터 ${a + 1}`, s: learned ? '/27 경로 2개' : 'AS 65133' }, { lit: i === 1 && learned }));
-        RY.forEach((y, b) => C.card(ctx, { x: wx, y, w: ww, h: H, t: `worker ${b + 1}`, s: 'Cilium AS 65130' }, { lit: i === 2 && t > 1.2 }));
+        RY.forEach((y, a) => C.card(ctx, { x: rx, y, w: rw, h: H, t: `라우터 ${a + 1}`, s: learned ? '/27 경로 2개' : 'AS 64513' }, { lit: i === 1 && learned }));
+        RY.forEach((y, b) => C.card(ctx, { x: wx, y, w: ww, h: H, t: `worker ${b + 1}`, s: 'Cilium AS 64512' }, { lit: i === 2 && t > 1.2 }));
         C.card(ctx, { x: 0, y: 98, w: cw, h: 52, t: '사용자', size: 11 });
         if (i === 1) [0, 1].forEach((a) => [0, 1].forEach((b) => {
           const idx = a * 2 + b, k = ease(t, 0.5 + idx * 0.4, 2.3 + idx * 0.4);

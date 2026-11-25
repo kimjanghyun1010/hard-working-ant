@@ -364,4 +364,4 @@ PID namespace는 기본으로 따로다. 사이드카가 앱 프로세스를 보
 - [Kubernetes — User Namespaces](https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/)
 - [Kubernetes — Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
 - [Kubernetes — Resource Management for Pods and Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
-- 원글: [CS 가상화](https://kimjanghyun1010.tistory.com/86), [Container System(cgroup namespaces)](https://kimjanghyun1010.tistory.com/64), [Container System(filesystem)](https://kimjanghyun1010.tistory.com/90), [Kube System](https://kimjanghyun1010.tistory.com/65)
+- 원글: [Container System(cgroup namespaces)](https://kimjanghyun1010.tistory.com/64), [Container System(filesystem)](https://kimjanghyun1010.tistory.com/90)

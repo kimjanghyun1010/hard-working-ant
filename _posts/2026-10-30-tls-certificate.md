@@ -375,4 +375,4 @@ kubelet은 CN과 O 덕분에 자기 노드 것만 읽는다. admin의 그룹 sys
 - [Kubernetes — Node Authorization](https://kubernetes.io/docs/reference/access-authn-authz/node/)
 - [Kubernetes — Certificate Management with kubeadm](https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/)
 - [kubernetes-the-hard-way — ca.conf](https://github.com/kelseyhightower/kubernetes-the-hard-way/blob/master/ca.conf)
-- 원글: [사설 인증서 발급](https://kimjanghyun1010.tistory.com/60), [Nginx Cipher 추가](https://kimjanghyun1010.tistory.com/110), [Nginx Ingress Controller OCSP 설정](https://kimjanghyun1010.tistory.com/92), [kubernetes-the-hard-way](https://kimjanghyun1010.tistory.com/87)
+- 원글: [사설 인증서 발급](https://kimjanghyun1010.tistory.com/60), [Nginx Cipher 추가](https://kimjanghyun1010.tistory.com/110), [Nginx Ingress Controller OCSP 설정](https://kimjanghyun1010.tistory.com/92)

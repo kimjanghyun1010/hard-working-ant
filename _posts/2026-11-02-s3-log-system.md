@@ -381,4 +381,4 @@ Glue Data Catalog의 관리형 압축(table optimizer)은 전체 테이블을 �
 - [Elastic: Templates](https://www.elastic.co/docs/manage-data/data-store/templates)
 - [Elastic: Index settings (number_of_shards, number_of_replicas)](https://www.elastic.co/docs/reference/elasticsearch/index-settings/index-modules)
 - [Elastic: Clusters, nodes, and shards](https://www.elastic.co/docs/deploy-manage/distributed-architecture/clusters-nodes-shards)
-- 원글: [S3로 로그시스템 만들기](https://kimjanghyun1010.tistory.com/111), [AWS Athena (w/ glue)](https://kimjanghyun1010.tistory.com/108), [Elastic Search 데이터 삭제 정책 등록(ILM)](https://kimjanghyun1010.tistory.com/21), [ElasticSearch 무중단 증설](https://kimjanghyun1010.tistory.com/119)
+- 원글: [Elastic Search 데이터 삭제 정책 등록(ILM)](https://kimjanghyun1010.tistory.com/21)
