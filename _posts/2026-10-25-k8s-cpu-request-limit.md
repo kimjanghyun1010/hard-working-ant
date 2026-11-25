@@ -240,8 +240,8 @@ kubelet이 두 값을 호스트 커널의 cgroup 파일로 바꿔 적고, CFS가
 cgroup에는 v1과 v2가 있다. 파일 이름과 값의 범위만 다르고 동작은 같다.
 
 - v2는 커널 4.5(2016)에 정식으로 들어왔고, 쿠버네티스는 1.25(2022)부터 정식 지원한다.
+- 1.35부터 kubelet은 기본값으로 cgroup v1 노드에서 시작하지 않는다(`failCgroupV1: true`). v1 노드를 계속 쓰려면 kubelet 설정에서 이 값을 false로 바꿔야 한다.
 - Ubuntu 22.04, RHEL 9 같은 요즘 배포판은 v2가 기본이다. 오래된 노드는 아직 v1인 경우가 많다.
-- 노드에서 `stat -fc %T /sys/fs/cgroup/`이 `cgroup2fs`면 v2, `tmpfs`면 v1이다.
 
 <figure class="fig" data-figure="cpu-layers">
   <figcaption>그림 9. requests(파랑)와 limits(주황)가 커널까지 가는 과정</figcaption>
@@ -598,6 +598,7 @@ vCPU 수만 보고 잡으면 놓치기 쉬운 것도 두 가지 있다.
 - [Kubernetes — Resource Management for Pods and Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
 - [Linux kernel — CFS Bandwidth Control](https://docs.kernel.org/scheduler/sched-bwc.html)
 - [Linux kernel — Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
+- [Kubernetes — The Shift to cgroup v2 in Kubernetes](https://kubernetes.io/blog/2026/10/06/kubernetes-cgroups-v2-shift/)
 - [perf-stat(1)](https://man7.org/linux/man-pages/man1/perf-stat.1.html)
 - [Node.js — Don't Block the Event Loop](https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop)
 - [libuv — Thread pool work scheduling](https://docs.libuv.org/en/v1.x/threadpool.html)
