@@ -80,7 +80,7 @@ kbd { font: 11px var(--mono); padding: 1px 6px; border: 1px solid var(--border);
 a.tag:hover { border-color: #c7d2fe; color: var(--accent-text); }
 
 /* prose */
-.prose { padding-top: 8px; }
+.prose { padding-top: 8px; line-height: 1.4; }
 .prose h2 { margin: 48px 0 8px; color: var(--text-strong); font-size: 22px; line-height: 1.4; font-weight: 600; letter-spacing: -0.02em; }
 .prose h3 { margin: 32px 0 4px; color: var(--text-strong); font-size: 18px; line-height: 1.5; font-weight: 600; }
 .prose p { margin: 0 0 16px; text-wrap: pretty; }
@@ -127,6 +127,13 @@ a.tag:hover { border-color: #c7d2fe; color: var(--accent-text); }
 /* figure */
 .fig { margin: 28px 0 36px; }
 .fig figcaption { margin-top: 10px; font-size: 13px; color: var(--text-muted); text-align: center; }
+.fig .cv-note { margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; text-wrap: balance; }
+.cv-demo { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 14px; cursor: default; }
+.cv-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; max-width: 420px; }
+.cv-modes button, .cv-run { padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.cv-modes button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.cv-run { padding: 8px 18px; border-color: #15803d; background: #16a34a; color: #fff; }
+.cv-modes button:focus-visible, .cv-run:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cv-box { position: relative; padding: 24px 28px; border: 1px solid var(--border); border-radius: 12px; background: #fff; cursor: pointer; }
 /* State mark: a play triangle while running, two bars while paused. */
 .cv-box::after { content: ""; position: absolute; top: 6px; right: 6px; box-sizing: border-box; width: 0; height: 0; border: solid transparent; border-width: 5px 0 5px 8px; border-left-color: var(--accent); opacity: .5; transition: opacity .15s; }

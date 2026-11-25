@@ -24,3 +24,4 @@ defaults:
 
 exclude:
   - CLAUDE.md
+  - tistory

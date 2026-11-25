@@ -48,13 +48,45 @@ hwa.player = (root, frame) => {
 // Scenes of equal length for figures built on hwa.loop(time, sec, hold, n).
 hwa.loopScenes = (sec, hold, n) => ({ n, at: (i) => i * (sec + hold), of: (t) => Math.floor((t % ((sec + hold) * n)) / (sec + hold)) });
 
-// A canvas scene sized to its container. frame(ctx, w, h, t, say) draws one frame at time t (seconds).
+// A canvas scene sized to its container. frame(ctx, w, h, t, say, ui) draws one frame at time t (seconds).
 // scenes = { n, at(i) -> start time, of(t) -> index } adds numbered buttons that show and jump to each scene.
-hwa.scene = (root, { height, frame, still = 0, scenes }) => {
+// The figcaption moves inside the card as its one-line note; notes[i] replaces it per scene, numbered ①②③.
+// demo = { modes: [labels], run: label } adds mode toggles and a run button; ui = { mode, runAt } reaches frame.
+const NUM = '①②③④⑤⑥';
+hwa.scene = (root, { height, frame, still = 0, scenes, notes, demo }) => {
   root.insertAdjacentHTML('afterbegin', '<div class="cv-box" title="클릭하면 멈추거나 다시 재생한다"><canvas role="img"></canvas></div>');
   const box = root.querySelector('.cv-box'), canvas = box.querySelector('canvas'), ctx = canvas.getContext('2d');
-  let w = 0, t = hwa.reduced ? still : 0, label = '', ctl, shown = -1;
+  let w = 0, t = hwa.reduced ? still : 0, label = '', ctl, shown = -1, noted = -1;
   const say = (text) => { if (text !== label) { label = text; canvas.setAttribute('aria-label', text); } };
+  const ui = { mode: 0, runAt: null };
+  if (demo) {
+    const bar = document.createElement('div'), go = document.createElement('button');
+    bar.className = 'cv-demo';
+    const modes = document.createElement('div');
+    modes.className = 'cv-modes';
+    demo.modes.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = s;
+      b.setAttribute('aria-pressed', i === 0);
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        ui.mode = i;
+        if (ui.runAt !== null) ui.runAt = t;
+        modes.querySelectorAll('button').forEach((x, j) => x.setAttribute('aria-pressed', j === i));
+        render();
+      });
+      modes.append(b);
+    });
+    go.type = 'button';
+    go.className = 'cv-run';
+    go.textContent = demo.run;
+    go.addEventListener('click', (e) => { e.stopPropagation(); ui.runAt = t; render(); ctl.play(); });
+    bar.append(modes, go);
+    box.append(bar);
+  }
+  const cap = root.querySelector('figcaption');
+  if (cap) { cap.classList.add('cv-note'); box.append(cap); }
   const nav = scenes && scenes.n > 1 ? document.createElement('div') : null;
   if (nav) {
     nav.className = 'cv-scenes';
@@ -71,9 +103,11 @@ hwa.scene = (root, { height, frame, still = 0, scenes }) => {
   }
   const render = () => {
     ctx.clearRect(0, 0, w, height);
-    frame(ctx, w, height, t, say);
+    frame(ctx, w, height, t, say, ui);
     const cur = nav ? scenes.of(t) : -1;
     if (cur !== shown) { shown = cur; nav.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-current', i === cur)); }
+    const ni = demo ? ui.mode : Math.max(0, cur);
+    if (cap && notes && ni !== noted) { noted = ni; cap.textContent = `${notes.length > 1 ? `${NUM[ni]} ` : ''}${notes[ni]}`; }
   };
   const fit = () => {
     const dpr = window.devicePixelRatio || 1;
@@ -209,6 +243,33 @@ cv.hatch = (ctx, color) => {
     hatches.set(color, c);
   }
   return ctx.createPattern(hatches.get(color), 'repeat');
+};
+
+// Event marker: a dashed vertical line with a short label on top, for the moment something happens.
+cv.event = (ctx, x, y0, y1, label, color = hwa.ui.red, align = 'center') => {
+  cv.dashed(ctx, x, y0, x, y1, color);
+  if (label) cv.text(ctx, label, align === 'left' ? x - 2 : x, y0 - 4, { size: 10, weight: 700, color, align });
+};
+// Verdict stamp: a large pill laid over the figure at the decisive moment, eased in by k.
+cv.stamp = (ctx, cx, cy, s, tone = 'bad', k = 1) => {
+  if (k <= 0) return;
+  const [bg, fg] = hwa.ui.tones[tone];
+  ctx.font = hwa.ui.font(13, 700);
+  const w = ctx.measureText(s).width + 28;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, k);
+  ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.roundRect(cx - w / 2, cy - 15, w, 30, 15);
+  ctx.fillStyle = bg;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = fg;
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  cv.text(ctx, s, cx, cy + 0.5, { size: 13, weight: 700, color: fg, align: 'center', base: 'middle' });
+  ctx.restore();
 };
 
 // Diagram components: boxes, value chips, cards, groups, arrows and step badges.
