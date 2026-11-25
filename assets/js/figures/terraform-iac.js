@@ -36,7 +36,10 @@
       ctx.globalAlpha = r.a === undefined ? 1 : Math.max(0, r.a);
       ctx.beginPath(); ctx.roundRect(x + 4, cy - (RH - 4) / 2, w - 8, RH - 4, 5);
       ctx.fillStyle = r.tone ? TONE[r.tone][0] : U.cell; ctx.fill();
-      C.text(ctx, r.k, x + 10, cy + 0.5, { size: 10, base: 'middle' });
+      ctx.font = U.font(10.5, 600);
+      const vw = ctx.measureText(r.v).width;
+      ctx.font = U.font(10);
+      if (x + 13 + ctx.measureText(r.k).width + vw <= x + w - 10) C.text(ctx, r.k, x + 10, cy + 0.5, { size: 10, base: 'middle' });
       C.text(ctx, r.v, x + w - 10, cy + 0.5, { size: 10.5, weight: 600, color: r.tone ? TONE[r.tone][1] : U.text, align: 'right', base: 'middle' });
       if (r.strike) C.line(ctx, [[x + 8, cy], [x + 8 + (w - 16) * r.strike, cy]], U.red, 1.5);
       ctx.globalAlpha = 1;
