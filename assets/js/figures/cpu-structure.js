@@ -5,8 +5,8 @@
   const mv = (k, a, b) => hwa.smooth((k - a) / (b - a));
   const lerp = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
   const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
-  const BLUE = ['#dbeafe', '#1d4ed8', '#3b82f6'], ORANGE = ['#fef3c7', '#b45309', '#f59e0b'], PURPLE = ['#ede9fe', '#6d28d9', '#a78bfa'];
-  const MUTE = [U.cell, U.muted, '#e2e8f0'];
+  const BLUE = ['#e7f5ff', '#1971c2', '#228be6'], ORANGE = ['#fff4e6', '#e8590c', '#fd7e14'], PURPLE = ['#f3f0ff', '#6741d9', '#9775fa'];
+  const MUTE = [U.cell, U.muted, '#e9ecef'];
   // Chip centred at (x, y), or right-aligned at x when right is set. col = [bg, fg, line].
   const tag = (ctx, s, x, y, col, { right = false, a = 1 } = {}) => {
     const cw = tw(ctx, s, 11, 600) + 18, x0 = right ? x - cw : x - cw / 2;
@@ -30,7 +30,7 @@
     ctx.fillStyle = fill;
     ctx.fill();
   };
-  const ring = (ctx, x, y, R, color = '#cbd5e1', width = 1) => {
+  const ring = (ctx, x, y, R, color = '#ced4da', width = 1) => {
     ctx.beginPath();
     ctx.arc(x, y, R, 0, TAU);
     ctx.strokeStyle = color;
@@ -39,7 +39,7 @@
     ctx.lineWidth = 1;
   };
   const layer = (ctx, x0, x1, y, label) => {
-    C.dashed(ctx, x0, y, x1, y, '#cbd5e1');
+    C.dashed(ctx, x0, y, x1, y, '#ced4da');
     C.text(ctx, label, x0 + 2, y + 14, { size: 10, weight: 600 });
   };
 
@@ -71,9 +71,9 @@
       const cx = 10, cy = MY + 22, cw = sw - 20, l3w = Math.round(clamp(cw * 0.2, 46, 120)), corew = cw - 22 - l3w, pw = (corew - 20) / 3;
       const rw = (sw - 32) / 3, ry = MY + 106;
       // Bus first so the boxes sit on top of it.
-      C.line(ctx, [[cx + 40, cy + 70], [cx + 40, BUS], [10 + 2 * (rw + 6) + rw / 2, BUS]], '#e2e8f0', 1);
-      [0, 1, 2].forEach((j) => C.line(ctx, [[10 + j * (rw + 6) + rw / 2, BUS], [10 + j * (rw + 6) + rw / 2, ry]], '#e2e8f0', 1));
-      C.line(ctx, [[sw - 10, ry + 18], [sw + 12, ry + 18]], '#cbd5e1', 1);
+      C.line(ctx, [[cx + 40, cy + 70], [cx + 40, BUS], [10 + 2 * (rw + 6) + rw / 2, BUS]], '#e9ecef', 1);
+      [0, 1, 2].forEach((j) => C.line(ctx, [[10 + j * (rw + 6) + rw / 2, BUS], [10 + j * (rw + 6) + rw / 2, ry]], '#e9ecef', 1));
+      C.line(ctx, [[sw - 10, ry + 18], [sw + 12, ry + 18]], '#ced4da', 1);
       C.box(ctx, cx, cy, cw, 70, { fill: '#fff', r: 8 });
       C.text(ctx, 'CPU 칩', cx + 8, cy + 13, { size: 9, weight: 600 });
       C.box(ctx, cx + 8, cy + 18, corew, 46, { fill: U.plot, r: 6 });
@@ -100,7 +100,7 @@
         // Out in f 0..0.4, back in 0.4..0.8, then the dot rests in the register.
         const path = route(at, id);
         if (id !== 'reg' && f < 0.8) {
-          C.line(ctx, path, '#c7d2fe', 1.2);
+          C.line(ctx, path, '#a5d8ff', 1.2);
           const [px, py] = C.pathAt(path, hwa.smooth(f < 0.4 ? f / 0.4 : 1 - (f - 0.4) / 0.4)).pop();
           ctx.beginPath();
           ctx.arc(px, py, 5, 0, TAU);
@@ -125,7 +125,7 @@
         ring(ctx, clX, cy, R);
         for (let j = 0; j < 12; j++) {
           const a = (j / 12) * TAU;
-          C.line(ctx, [[clX + Math.cos(a) * (R - 3), cy + Math.sin(a) * (R - 3)], [clX + Math.cos(a) * R, cy + Math.sin(a) * R]], '#cbd5e1', 1);
+          C.line(ctx, [[clX + Math.cos(a) * (R - 3), cy + Math.sin(a) * (R - 3)], [clX + Math.cos(a) * R, cy + Math.sin(a) * R]], '#ced4da', 1);
         }
         if (s < 3600) {
           const a = -Math.PI / 2 + (s / 3600) * TAU;
@@ -169,7 +169,7 @@
         C.text(ctx, '메인보드', 10, BY + 16, { size: 10, weight: 600 });
         C.box(ctx, 8, SY, w - 16, SH, { fill: U.plot, dash: [4, 3], r: 8 });
         ctx.globalAlpha = ks;
-        C.box(ctx, 8, SY, w - 16, SH, { fill: '#fff', stroke: '#cbd5e1', on: i === 0, r: 8 });
+        C.box(ctx, 8, SY, w - 16, SH, { fill: '#fff', stroke: '#ced4da', on: i === 0, r: 8 });
         C.text(ctx, '소켓 0 (CPU 칩)', 18, SY + 17, { size: 11, weight: 600, color: U.text });
         ctx.globalAlpha = 1;
         const hint = '칸 안 숫자 = CPU 번호';
@@ -180,7 +180,7 @@
           if (kc <= 0) continue;
           const x = 18 + (c % COLS) * (cw + GAP), y = SY + 28 + Math.floor(c / COLS) * (CH + GAP), kt = clamp(nt - c);
           ctx.globalAlpha = kc;
-          C.box(ctx, x, y, cw, CH, { fill: '#fff', stroke: '#cbd5e1', r: 6, on: (i === 1 && c === cores) || (i === 2 && c === threads) });
+          C.box(ctx, x, y, cw, CH, { fill: '#fff', stroke: '#ced4da', r: 6, on: (i === 1 && c === cores) || (i === 2 && c === threads) });
           C.text(ctx, `코어 ${c}`, x + 6, y + 10, { size: 9, weight: 600, color: U.text, base: 'middle' });
           ctx.globalAlpha = 1;
           // Data: Intel Linux numbers sibling threads c and c + 16.
@@ -203,7 +203,7 @@
 
   // requests (blue) and limits (orange) go down the layers one at a time, changing form at each stop.
   document.querySelectorAll('[data-figure="cpu-layers"]').forEach((root) => {
-    const SEC = 5.6, HOLD = 1.6, NY = 94, KH = 34, ORG = ['#fef3c7', '#b45309', '#f59e0b'];
+    const SEC = 5.6, HOLD = 1.6, NY = 94, KH = 34, ORG = ['#fff4e6', '#e8590c', '#fd7e14'];
     // Data: request 500m -> shares 512 -> weight 20; limit 1000m -> quota 100000 per period 100000.
     const ST = [
       { name: 'Pod 스펙', sub: 'API 서버에 저장', y: 30, h: 52, v: ['requests: 500m', 'limits: 1000m'] },

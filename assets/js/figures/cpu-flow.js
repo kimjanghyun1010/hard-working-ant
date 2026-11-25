@@ -10,7 +10,7 @@
   const ease = (t, a, b) => hwa.smooth((t - a) / (b - a));
   const mix = (p, q, k) => [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
   const fmt = (n) => n.toLocaleString('en-US');
-  const WAIT = ['#fef3c7', '#b45309', '#fcd34d'], DATA = ['#eff6ff', '#1d4ed8', '#93c5fd'];
+  const WAIT = ['#fff4e6', '#e8590c', '#ffd43b'], DATA = ['#e7f5ff', '#1971c2', '#74c0fc'];
 
   // Waiting for N requests: one thread per request (A) against one thread in epoll_wait (B), under the same load.
   document.querySelectorAll('[data-figure="cpu-wait-model"]').forEach((root) => {
@@ -45,17 +45,17 @@
           const x = side * (pw + 12), gx = x + (pw - g) / 2, cx = x + pw / 2, ty = y0 + 46, sy = y0 + 184;
           C.group(ctx, x, y0, pw, 296, side ? 'B. epoll과 스레드 1개' : 'A. 요청마다 스레드', y0 + 18);
           C.text(ctx, '사용자 공간', x + 10, y0 + 38, { size: 10 });
-          C.dashed(ctx, x + 8, y0 + 158, x + pw - 8, y0 + 158, '#cbd5e1');
+          C.dashed(ctx, x + 8, y0 + 158, x + pw - 8, y0 + 158, '#ced4da');
           C.text(ctx, '커널', x + 10, y0 + 174, { size: 10 });
           C.text(ctx, side ? 'epoll 감시 목록' : '소켓', x + pw - 10, y0 + 174, { size: 10, align: 'right' });
           if (side) {
             const cw = Math.min(140, pw - 20);
             C.box(ctx, gx - 6, sy - 6, g + 12, g + 12, { fill: '#fff' });
-            C.arrow(ctx, [[cx, ty + 92], [cx, sy - 8]], 1, '#94a3b8', { width: 1.2 });
+            C.arrow(ctx, [[cx, ty + 92], [cx, sy - 8]], 1, '#adb5bd', { width: 1.2 });
             C.card(ctx, { x: cx - cw / 2, y: ty + 46, w: cw, h: 46, t: '메인 스레드', s: 'epoll_wait 대기' }, { fill: WAIT[0], stroke: WAIT[2] });
           } else {
             C.text(ctx, wide ? '스레드마다 read 대기' : 'read 대기', x + pw - 10, y0 + 38, { size: 10, weight: 600, color: WAIT[1], align: 'right' });
-            grid(ctx, gx, ty, size, cnt, '#f59e0b');
+            grid(ctx, gx, ty, size, cnt, '#fd7e14');
           }
           grid(ctx, gx, sy, size, cnt, U.blue);
           const threads = side ? 1 : load, big = threads >= 1000;
@@ -156,7 +156,7 @@
           chip(ctx, '메인 스레드', ...p, WAIT, 66);
         }
         const call = i === 0 ? ease(t, 0.4, 1.2) : i === 1 ? 1 : ease(t, 0.2, 1.0);
-        C.arrow(ctx, [[L.cx - 26, 92], [L.cx - 26, 136]], call, i === 1 ? '#94a3b8' : U.accent);
+        C.arrow(ctx, [[L.cx - 26, 92], [L.cx - 26, 136]], call, i === 1 ? '#adb5bd' : U.accent);
         if (wt && t >= 6.6) C.arrow(ctx, [[L.cx + 26, 136], [L.cx + 26, 92]], ease(t, 6.6, 7.3), U.blue);
         if (wt) C.stamp(ctx, L.cx - L.cw / 2 - Math.min(80, (L.cx - L.cw / 2) / 2), 75, 'fd 21 받음', 'ok', (run - 7.4) / 0.4);
         say(`${CALL[i][1]}. ${notes[i]}`);
