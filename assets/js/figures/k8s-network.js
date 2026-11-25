@@ -216,7 +216,7 @@
           link(ctx, [[cw, LY], [px, PY[1] + 25]]);
           C.box(ctx, sx, LY - 30, sw, 60, { fill: U.plot, dash: [3, 3] });
           const lost = r >= KILL;
-          C.text(ctx, lost ? `${OLD}로 보냄` : 'Service 안 씀', sx + sw / 2, LY + 0.5, { size: 10, weight: lost ? 600 : 400, color: lost ? U.red : U.muted, align: 'center', base: 'middle' });
+          C.text(ctx, lost ? `${OLD}로 보냄` : 'Service 안 씀', sx + sw / 2, LY - 14, { size: 10, weight: lost ? 600 : 400, color: lost ? U.red : U.muted, align: 'center', base: 'middle' });
         }
         C.card(ctx, cl);
         PY.forEach((y, j) => {

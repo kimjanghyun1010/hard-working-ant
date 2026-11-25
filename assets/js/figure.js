@@ -248,7 +248,7 @@ cv.hatch = (ctx, color) => {
 // Event marker: a dashed vertical line with a short label on top, for the moment something happens.
 cv.event = (ctx, x, y0, y1, label, color = hwa.ui.red, align = 'center') => {
   cv.dashed(ctx, x, y0, x, y1, color);
-  if (label) cv.text(ctx, label, align === 'left' ? x - 2 : x, y0 - 4, { size: 10, weight: 700, color, align });
+  if (label) cv.text(ctx, label, align === 'left' ? x + 4 : x, y0 - 4, { size: 10, weight: 700, color, align });
 };
 // Verdict stamp: a large pill laid over the figure at the decisive moment, eased in by k.
 cv.stamp = (ctx, cx, cy, s, tone = 'bad', k = 1) => {

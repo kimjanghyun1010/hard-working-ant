@@ -545,7 +545,7 @@
           C.line(ctx, pts, U.blue);
           for (let j = 1; j <= shown; j++) {
             const done = j === 3;
-            C.event(ctx, X(RUNS[j][0]), y0 + 14, y0 + H, done ? 'SUCCEEDED' : '더 남음', done ? '#16a34a' : '#b45309', done ? 'center' : 'left');
+            C.event(ctx, X(RUNS[j][0]), y0 + 14, y0 + H, done ? '완료' : '더 남음', done ? '#16a34a' : '#b45309', done ? 'center' : 'left');
           }
           [[1, '합치기 전'], [2, '1회'], [3, '2회'], [4, '3회']].forEach(([v, s]) => C.text(ctx, s, X(v), y0 + H + 15, { size: 9, align: v === 1 ? 'left' : 'center' }));
           C.dot(ctx, pts[pts.length - 1][0], pts[pts.length - 1][1], U.blue, fmt(last), pts[pts.length - 1][1] - 10);

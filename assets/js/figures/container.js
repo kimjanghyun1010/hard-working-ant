@@ -517,7 +517,7 @@
     const notes = ['컨테이너 레이어에 둔 파일은 옛 컨테이너와 함께 지워진다.', '볼륨에 둔 파일은 새 컨테이너의 /data에 그대로 붙는다.'];
     hwa.scene(root, {
       height: 258, still: 0, notes,
-      demo: { modes: ['컨테이너 레이어에 저장', '볼륨에 저장'], run: '새 버전으로 교체' },
+      demo: { modes: ['컨테이너 레이어', '볼륨'], run: '새 버전으로 교체' },
       frame: (ctx, w, h, time, say, ui) => {
         const m = ui.mode, r = ui.runAt === null ? -1 : time - ui.runAt;
         const bw = (w - 24) / 2, by = 34, bh = 118, VY = 190, X2 = w - bw;

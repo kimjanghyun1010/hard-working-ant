@@ -412,7 +412,7 @@
 
   // Demo: the client asks the CA's OCSP responder itself, or the server staples a response it fetched earlier.
   fig('revocation', () => {
-    const SEC = 6.4, HOLD = 2, TOP = 30, demo = { modes: ['클라이언트가 직접 확인', 'OCSP stapling'], run: '접속하기' };
+    const SEC = 6.4, HOLD = 2, TOP = 30, demo = { modes: ['직접 확인', 'OCSP stapling'], run: '접속하기' };
     const notes = [
       '직접 확인: 핸드셰이크 중에 CA까지 한 번 더 다녀오고, CA에는 누가 어느 사이트에 접속하는지 남는다.',
       'stapling: 서버가 미리 받아 둔 OCSP 응답을 인증서와 같이 보내서 추가 왕복이 없다.',

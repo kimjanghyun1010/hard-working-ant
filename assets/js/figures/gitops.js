@@ -45,7 +45,8 @@
     if (a <= 0) return;
     const c = tone ? COL[tone] : null;
     ctx.globalAlpha = a * (dim ? 0.55 : 1);
-    C.card(ctx, { x: b.x, y: b.y, w: b.w, h: b.h, t: b.label, s: s ? ' ' : '', size: b.size }, { lit, fill: c ? c[0] : '#fff', stroke: c ? c[2] : U.grid, dim });
+    const size = b.size || (tw(ctx, b.label, 12, 600) > b.w - 12 ? 10.5 : 12);
+    C.card(ctx, { x: b.x, y: b.y, w: b.w, h: b.h, t: b.label, s: s ? ' ' : '', size }, { lit, fill: c ? c[0] : '#fff', stroke: c ? c[2] : U.grid, dim });
     if (s) C.text(ctx, s, b.cx, b.cy + 9, { size: 10, weight: tone ? 600 : 400, color: c ? c[1] : U.muted, align: 'center', base: 'middle' });
     ctx.globalAlpha = 1;
   };

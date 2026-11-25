@@ -626,7 +626,9 @@
         });
         C.text(ctx, '종류(kind)', ax + 10, 220, { size: 9 });
         const r3 = row(3), r2 = row(2);
-        if (cr) tag(ctx, 'main', r3.x + r3.w - 20, r3.y + r3.h / 2, PURPLE, { size: 9, h: 16, a: i === 2 ? 1 : ease(t, 1.6, 2.0) });
+        ctx.font = U.font(10, 600);
+        const roomy = r3.w - 8 - ctx.measureText('Prometheus').width > 48;
+        if (cr) tag(ctx, 'main', roomy ? r3.x + r3.w - 20 : r3.x + 22, roomy ? r3.y + r3.h / 2 : r3.y + r3.h + 11, PURPLE, { size: 9, h: 16, a: i === 2 ? 1 : ease(t, 1.6, 2.0) });
         unit(ctx, op, '오퍼레이터', opLit ? (i === 2 ? '원하는 2, 실제 1' : 'CR 감지') : 'Prometheus', { col: opLit ? ORANGE : ['#fff', U.text, U.grid], lit: opLit, size: 11 });
         // User request into the API server: the CRD and the CR go to the new kind's row, the edit to StatefulSet.
         const into = (b) => [[uw, user.y + user.h / 2], [ax + 4, user.y + user.h / 2], [ax + 4, b.y + b.h / 2], [b.x + 8, b.y + b.h / 2]];
