@@ -442,4 +442,4 @@ sudo sysctl fs.inotify.max_user_watches=1255360
 - [Kubeflow — Releases](https://www.kubeflow.org/docs/releases/)
 - [Argo Workflows — Workflow Executors](https://argo-workflows.readthedocs.io/en/latest/workflow-executors/)
 - [Red Hat — CentOS Linux EOL](https://www.redhat.com/en/topics/linux/centos-linux-eol)
-- 원글: [Kubeflow(v1.1, v1.2) install (CentOS 7)](https://kimjanghyun1010.tistory.com/20), [k3s gpu containerd 설정 kubeflow 구축](https://kimjanghyun1010.tistory.com/75), [rke2 gpu](https://kimjanghyun1010.tistory.com/78), [k3s Install](https://kimjanghyun1010.tistory.com/25)
+- 원글: [Kubeflow(v1.1, v1.2) install (CentOS 7)](https://kimjanghyun1010.tistory.com/20), [k3s gpu containerd 설정 kubeflow 구축](https://kimjanghyun1010.tistory.com/75), [k3s Install](https://kimjanghyun1010.tistory.com/25)
