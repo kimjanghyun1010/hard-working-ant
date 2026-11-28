@@ -1,6 +1,10 @@
 {%- assign groups = site.posts | where_exp: "p", "p.series" | group_by: "series" -%}
 {%- assign loose = site.posts | where_exp: "p", "p.series == nil" -%}
 <aside class="space-nav" aria-label="블로그 페이지">
+  <button type="button" class="nav-toggle" data-nav-toggle aria-label="사이드바 접기" aria-expanded="true">
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 2.5 4 6l3.5 3.5"/></svg>
+  </button>
+  <div class="space-scroll">
   <nav class="space-links">
     <a class="i-home" href="{{ '/' | relative_url }}"{% if page.url == '/' %} aria-current="page"{% endif %}>개요</a>
     <a class="i-series" href="{{ '/series/' | relative_url }}"{% if page.url == '/series/' %} aria-current="page"{% endif %}>시리즈</a>
@@ -21,5 +25,6 @@
     {%- for p in loose %}
     <a class="leaf" href="{{ p.url | relative_url }}"{% if p.url == page.url %} aria-current="page"{% endif %}>{{ p.title }}</a>
     {%- endfor %}
+  </div>
   </div>
 </aside>
