@@ -1,0 +1,14 @@
+---
+layout: default
+title: 모든 글
+permalink: /posts/
+---
+<div class="page">
+  <h1 class="post-title">모든 글</h1>
+  <p class="post-lede">{{ site.description }}, 글 {{ site.posts.size }}편</p>
+  <ul class="post-list">
+    {%- for p in site.posts %}
+    {% include post-item.html post=p %}
+    {%- endfor %}
+  </ul>
+</div>

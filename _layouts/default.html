@@ -30,7 +30,8 @@
       hard-working-ant
     </a>
     <nav class="site-nav" aria-label="주 메뉴">
-      <a href="{{ '/' | relative_url }}"{% if page.url == '/' or page.layout == 'post' %} aria-current="page"{% endif %}>글</a>
+      <a href="{{ '/' | relative_url }}"{% if page.url == '/' or page.url == '/posts/' or page.layout == 'post' %} aria-current="page"{% endif %}>글</a>
+      <a href="{{ '/board/' | relative_url }}"{% if page.url == '/board/' %} aria-current="page"{% endif %}>보드</a>
       <a href="{{ '/series/' | relative_url }}"{% if page.url == '/series/' %} aria-current="page"{% endif %}>시리즈</a>
       <a href="{{ '/tags/' | relative_url }}"{% if page.url == '/tags/' %} aria-current="page"{% endif %}>태그</a>
       <a href="https://github.com/{{ site.repository }}">GitHub</a>

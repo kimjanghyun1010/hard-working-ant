@@ -25,3 +25,11 @@ defaults:
 exclude:
   - CLAUDE.md
   - tistory
+
+# Series in reading order; the home cards and the board columns follow it.
+series_order:
+  - Back to the Basic
+  - Kubernetes
+  - 인프라 운영
+  - CI/CD와 IaC
+  - AI와 자동화

@@ -1,12 +1,28 @@
 ---
 layout: default
 ---
-<div class="page">
-  <h1 class="post-title">최근 업데이트</h1>
-  <p class="post-lede">{{ site.description }}, 글 {{ site.posts.size }}편</p>
-  <ul class="post-list">
-    {%- for p in site.posts %}
-    {% include post-item.html post=p %}
+<div class="page wide">
+  <h1 class="post-title">개요</h1>
+  <div class="intro"><span class="i" aria-hidden="true">i</span><p>인프라와 백엔드 기술을 하나의 질문에서 원인과 결과로 따라가는 글을 모은다. 처음이라면 Back to the Basic부터 읽는다.</p></div>
+  <h2 class="ov-head">시리즈</h2>
+  <div class="ov-grid">
+    {%- for s in site.series_order %}
+    {%- assign items = site.posts | where: "series", s | reverse %}
+    <section class="ov-card" style="--c: var(--s{{ forloop.index0 }})">
+      <h3><a href="{{ '/series/' | relative_url }}#{{ s | slugify }}">{{ s }}</a><small>{{ items.size }}편</small></h3>
+      <ol>
+        {%- for p in items %}
+        <li><a href="{{ p.url | relative_url }}">{{ p.title }}</a></li>
+        {%- endfor %}
+      </ol>
+    </section>
+    {%- endfor %}
+  </div>
+  <h2 class="ov-head">최근 업데이트<a href="{{ '/posts/' | relative_url }}">모든 글 보기</a></h2>
+  <ul class="ov-recent">
+    {%- for p in site.posts limit: 6 %}
+    {%- assign k = 0 %}{% for s in site.series_order %}{% if s == p.series %}{% assign k = forloop.index0 %}{% endif %}{% endfor %}
+    <li><a class="title" href="{{ p.url | relative_url }}">{{ p.title }}</a>{% if p.series %}<span class="loz" style="--c: var(--s{{ k }})">{{ p.series }}</span>{% endif %}<time datetime="{{ p.date | date_to_xmlschema }}">{{ p.date | date: "%Y-%m-%d" }}</time></li>
     {%- endfor %}
   </ul>
 </div>

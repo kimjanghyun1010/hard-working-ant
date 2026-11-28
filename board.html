@@ -1,0 +1,24 @@
+---
+layout: default
+title: 보드
+permalink: /board/
+---
+<div class="board-page">
+  <h1 class="post-title">시리즈별 글</h1>
+  <p class="board-lede">칸 안에서는 위에서 아래로 읽는 순서다.</p>
+  <div class="board">
+    {%- for s in site.series_order %}
+    {%- assign items = site.posts | where: "series", s | reverse %}
+    <section class="board-col" style="--c: var(--s{{ forloop.index0 }})">
+      <h2>{{ s }}<small>{{ items.size }}</small></h2>
+      {%- for p in items %}
+      <a class="board-card" href="{{ p.url | relative_url }}">
+        <span class="n"><span>{{ forloop.index | prepend: '0' | slice: -2, 2 }}</span><time datetime="{{ p.date | date_to_xmlschema }}">{{ p.date | date: "%m-%d" }}</time></span>
+        <span class="t">{{ p.title }}</span>
+        {%- if p.description %}<span class="d">{{ p.description }}</span>{% endif %}
+      </a>
+      {%- endfor %}
+    </section>
+    {%- endfor %}
+  </div>
+</div>
