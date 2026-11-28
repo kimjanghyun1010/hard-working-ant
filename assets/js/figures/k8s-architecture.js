@@ -97,7 +97,7 @@
     ];
     const n = ST.length;
     hwa.scene(root, {
-      height: 356, still: n * STEP + 0.5,
+      height: 356, still: n * STEP + 0.5, scenes: hwa.stepScenes(n, STEP, HOLD),
       frame: (ctx, w, h, time, say) => {
         const t = time % (n * STEP + HOLD), cur = Math.min(n - 1, Math.floor(t / STEP)), f = t >= n * STEP ? 1 : hwa.smooth((t - cur * STEP) / (STEP * 0.6)), y0 = 32;
         const step = ST[cur], state = f > 0.9 ? step[3] : (ST[cur - 1] || ST[0])[3];

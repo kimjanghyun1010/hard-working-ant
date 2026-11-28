@@ -260,7 +260,7 @@
     const FILES = [['memory.max', 'max', '1073741824', 1], ['cpu.max', 'max 100000', '100000 100000', 1], ['cgroup.procs', '', '4321', 2]];
     const TXT = ['디렉터리 하나가 cgroup 하나', '파일에 상한을 쓴다', 'PID를 넣으면 제한이 걸린다', '커널이 사용량을 잰다'];
     hwa.scene(root, {
-      height: 306, still: N * STEP + 0.8,
+      height: 306, still: N * STEP + 0.8, scenes: hwa.stepScenes(N, STEP, HOLD),
       notes: ['kubelet과 containerd가 디렉터리를 만들고 상한을 쓴 뒤 PID를 넣으면, 커널이 그 프로세스의 사용량을 잰다.'],
       frame: (ctx, w, h, time, say) => {
         const tt = time % (N * STEP + HOLD), cur = Math.min(N - 1, Math.floor(tt / STEP)), loc = (j) => clamp((tt - j * STEP) / (STEP * 0.75));

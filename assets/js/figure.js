@@ -47,6 +47,8 @@ hwa.player = (root, frame) => {
 };
 
 // Scenes of equal length for figures built on hwa.loop(time, sec, hold, n).
+// Steps of one sequence built on hwa.steps(time, n, step, hold): one button per step.
+hwa.stepScenes = (n, step, hold) => ({ n, at: (i) => i * step, of: (t) => Math.min(n - 1, Math.floor((t % (n * step + hold)) / step)) });
 hwa.loopScenes = (sec, hold, n) => ({ n, at: (i) => i * (sec + hold), of: (t) => Math.floor((t % ((sec + hold) * n)) / (sec + hold)) });
 
 // A canvas scene sized to its container. frame(ctx, w, h, t, say, ui) draws one frame at time t (seconds).
@@ -108,7 +110,7 @@ hwa.scene = (root, { height, frame, still = 0, scenes, notes, demo }) => {
     const cur = nav ? scenes.of(t) : -1;
     if (cur !== shown) { shown = cur; nav.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-current', i === cur)); }
     const ni = demo ? ui.mode : Math.max(0, cur);
-    if (cap && notes && ni !== noted) { noted = ni; cap.textContent = `${notes.length > 1 ? `${NUM[ni]} ` : ''}${notes[ni]}`; }
+    if (cap && notes && ni !== noted) { noted = ni; cap.textContent = notes.length > 1 ? `${NUM[ni]} ${notes[ni]}` : notes[0]; }
   };
   const fit = () => {
     const dpr = window.devicePixelRatio || 1;

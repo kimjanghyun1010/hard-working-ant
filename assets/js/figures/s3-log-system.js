@@ -188,7 +188,7 @@
     const STEP = 1.2, HOLD = 2.6, N = 5;
     const SAY = ['쿼리 받음', '테이블 위치 조회', '현재 스냅샷 찾기', '파일 목록과 파티션 값', '필요한 파일만 읽기'];
     hwa.scene(root, {
-      height: 262, still: N * STEP + 1,
+      height: 262, still: N * STEP + 1, scenes: hwa.stepScenes(N, STEP, HOLD),
       frame: (ctx, w, h, time, say) => {
         const s = hwa.steps(time, N, STEP, HOLD), cur = s.done ? N - 1 : s.active;
         C.pill(ctx, 0, 0, `${cur + 1}. ${SAY[cur]}`, 'info');

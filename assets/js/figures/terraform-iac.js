@@ -181,7 +181,7 @@
     const SAY = ['코드에 web이 있고 state에는 없어서 새로 만든다.', 'apply가 클라우드 API로 VM을 만든다.', '클라우드가 붙인 ID를 state에 web과 짝지어 적는다.', '다음 실행은 이 ID로 실제 VM을 읽어 온다(refresh).'];
     const LIT = [[0, 1], [2], [1, 2], [1, 2]];
     hwa.scene(root, {
-      height: 214, still: 4 * STEP + 1.2, notes: ['state는 코드의 이름과 클라우드의 ID를 짝지어 둔 대응표다.'],
+      height: 214, still: 4 * STEP + 1.2, scenes: hwa.stepScenes(4, STEP, HOLD), notes: ['state는 코드의 이름과 클라우드의 ID를 짝지어 둔 대응표다.'],
       frame: (ctx, w, h, time, say) => {
         const s = hwa.steps(time, 4, STEP, HOLD), cur = s.done ? 4 : s.active, gap = 16, cw = (w - 2 * gap) / 3, X = (j) => j * (cw + gap), top = 48;
         const lit = (j) => !s.done && LIT[cur].includes(j), vm = cur >= 1 ? s.k(1) : 0, id = cur >= 2 ? s.k(2) : 0;
