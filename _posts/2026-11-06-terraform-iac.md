@@ -7,6 +7,15 @@ tags: [terraform, iac, packer, ansible]
 scripts: [figures/terraform-iac.js]
 ---
 
+## 요약
+
+- Terraform은 코드, state, 실제 자원을 견준다. state는 코드의 주소와 클라우드 ID를 잇는 대응표이고, serial과 lineage로 어느 state인지 가린다.
+- plan은 refresh로 state를 실제에 맞춘 뒤 코드와 주소별로 견준다. 콘솔 변경은 드리프트로 잡혀 되돌려지고, 바뀌는 목록은 for_each의 키로 주소를 붙인다.
+- apply는 참조로 만든 그래프를 따라 의존이 끝난 자원부터 기본 10개씩 병렬로 실행하고, 지울 때는 역순으로 간다.
+- 그 자리에서 못 고치는 속성은 교체(`-/+`)가 되고 기본은 지우고 만들기다. 중단이 안 되는 자원은 겹치지 않는 이름과 create_before_destroy로 바꾼다.
+- 원격 state는 저장소의 "없을 때만 만들기"로 잠그고, 사고는 객체 버전 관리로 되돌린다.
+- API로 보이지 않는 서버 안쪽은 Packer 이미지와 Ansible의 멱등한 작업이 맡고, check 모드가 Ansible의 plan이다.
+
 ## 코드, state, 실제 자원
 
 Terraform 코드 한 줄은 실행할 명령이 아니라 있어야 할 모습의 선언이다. Terraform은 이 선언을 지금 있는 것과 견주고 차이만큼만 클라우드 API를 부르는데, 견주는 대상은 세 곳에 나뉘어 있다.
@@ -284,14 +293,6 @@ Terraform의 plan에 해당하는 것은 check 모드다. `--check`는 서버를
 - check 모드를 지원하지 않는 모듈은 아무것도 보고하지 않고 아무것도 하지 않는다.
 - 앞 작업의 결과(`register`)에 기대는 조건부 작업은 앞 작업이 실제로 돌지 않아 결과가 나오지 않는다.
 
-## 정리
-
-- Terraform은 코드, state, 실제 자원을 견준다. state는 코드의 주소와 클라우드 ID를 잇는 대응표이고, serial과 lineage로 어느 state인지 가린다.
-- plan은 refresh로 state를 실제에 맞춘 뒤 코드와 주소별로 견준다. 콘솔 변경은 드리프트로 잡혀 되돌려지고, 바뀌는 목록은 for_each의 키로 주소를 붙인다.
-- apply는 참조로 만든 그래프를 따라 의존이 끝난 자원부터 기본 10개씩 병렬로 실행하고, 지울 때는 역순으로 간다.
-- 그 자리에서 못 고치는 속성은 교체(`-/+`)가 되고 기본은 지우고 만들기다. 중단이 안 되는 자원은 겹치지 않는 이름과 create_before_destroy로 바꾼다.
-- 원격 state는 저장소의 "없을 때만 만들기"로 잠그고, 사고는 객체 버전 관리로 되돌린다.
-- API로 보이지 않는 서버 안쪽은 Packer 이미지와 Ansible의 멱등한 작업이 맡고, check 모드가 Ansible의 plan이다.
 
 ## 참고
 

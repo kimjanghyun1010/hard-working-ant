@@ -7,6 +7,15 @@ tags: [gpu, kubernetes, nvidia, kubeflow]
 scripts: [figures/gpu-kubeflow.js]
 ---
 
+## 요약
+
+- 컨테이너는 장치 파일과 호스트 드라이버 라이브러리가 있어야 GPU를 본다. nvidia 런타임이 `NVIDIA_VISIBLE_DEVICES`의 GPU만 넣는다.
+- device plugin은 GPU 개수를 노드에 올리고 `Allocate`로 고른 GPU를 런타임에 전한다. GPU는 정수이고 넘쳐 쓰지 않는다.
+- 정수라서 GPU는 통째로 간다. time-slicing은 시간만, MPS는 메모리 몫까지, MIG는 하드웨어를 나눈다.
+- 개수로는 GPU 종류를 가리지 못한다. DRA는 장치를 속성으로 요청한다.
+- GPU Operator는 이 층들을 순서대로 파드로 올린다. 직접 깐 층은 끈다.
+- Kubeflow Pipelines는 단계마다 파드를 띄워 학습 단계만 GPU를 쥔다.
+
 ## 컨테이너 안의 GPU
 
 쿠버네티스 파드가 GPU를 쓰려면 두 가지가 맞아야 한다. 컨테이너 안에서 GPU가 보여야 하고, 스케줄러가 어느 노드에 GPU가 몇 개 남았는지 알아야 한다. 쿠버네티스는 둘 다 스스로 하지 못해서 컨테이너 런타임과 device plugin이 나눠 맡는다.
@@ -230,14 +239,6 @@ def train_pipeline():
 
 노트북은 time-slicing GPU에 두고, 오래 걸리는 학습은 파이프라인 단계로 넘겨 GPU 통째나 MIG 조각으로 받는다.
 
-## 정리
-
-- 컨테이너는 장치 파일과 호스트 드라이버 라이브러리가 있어야 GPU를 본다. nvidia 런타임이 `NVIDIA_VISIBLE_DEVICES`의 GPU만 넣는다.
-- device plugin은 GPU 개수를 노드에 올리고 `Allocate`로 고른 GPU를 런타임에 전한다. GPU는 정수이고 넘쳐 쓰지 않는다.
-- 정수라서 GPU는 통째로 간다. time-slicing은 시간만, MPS는 메모리 몫까지, MIG는 하드웨어를 나눈다.
-- 개수로는 GPU 종류를 가리지 못한다. DRA는 장치를 속성으로 요청한다.
-- GPU Operator는 이 층들을 순서대로 파드로 올린다. 직접 깐 층은 끈다.
-- Kubeflow Pipelines는 단계마다 파드를 띄워 학습 단계만 GPU를 쥔다.
 
 ## 참고
 

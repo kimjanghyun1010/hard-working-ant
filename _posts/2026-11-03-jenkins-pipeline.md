@@ -7,6 +7,15 @@ tags: [jenkins, ci, groovy, kubernetes, kaniko]
 scripts: [figures/jenkins-pipeline.js]
 ---
 
+## 요약
+
+- 컨트롤러는 큐와 해석만 맡고 실행기는 0개다. 파드 에이전트는 큐 대기를 없애지만 `containerCap`과 노드 자리가 새 천장이다.
+- Groovy는 CPS로 바뀌어 컨트롤러 한 JVM에서 돌고, 상태는 `program.dat`에 남는다. 무거운 일은 `sh`로 에이전트에 보낸다.
+- `sh`는 `nohup` 래퍼와 로그 파일로 돌아 재시작을 견딘다. 명령 문자열은 컨트롤러에서 완성되니 비밀값은 작은따옴표로 넘긴다.
+- 파드의 컨테이너는 workspace 볼륨을 같이 쓴다. 노드에 dockerd가 없어 kaniko로 이미지를 만들고, 한 컨테이너면 `--ignore-path`로 workspace를 지킨다.
+- 반복되는 빌드 코드는 Shared Library로 모은다. 글로벌 라이브러리는 샌드박스 밖에서 돌아 push 권한이 관리자 권한이다.
+- 권한은 역할 표와 함께 `Job/Configure`와 자격증명 범위까지 본다.
+
 ## 컨트롤러와 에이전트
 
 Jenkinsfile의 코드 한 줄은 컨트롤러와 에이전트 중 어디서, 어떤 권한으로 돌까? Jenkins는 일을 두 자리로 나눈다.
@@ -222,14 +231,6 @@ controller:
 - `Job/Configure`: 공식 권한 문서상 `Run/Replay`를 포함한다. Replay는 Jenkinsfile을 고쳐 그 자리에서 다시 돌리는 기능이라, 그 Job이 쓰는 자격증명으로 아무 코드나 돌릴 수 있다. 운영 폴더에서는 빌드와 설정 권한을 나눈다.
 - 자격증명 범위: 전역이 아니라 폴더 단위로 둬서, 운영 kubeconfig가 개발 폴더 Job에 보이지 않게 한다.
 
-## 정리
-
-- 컨트롤러는 큐와 해석만 맡고 실행기는 0개다. 파드 에이전트는 큐 대기를 없애지만 `containerCap`과 노드 자리가 새 천장이다.
-- Groovy는 CPS로 바뀌어 컨트롤러 한 JVM에서 돌고, 상태는 `program.dat`에 남는다. 무거운 일은 `sh`로 에이전트에 보낸다.
-- `sh`는 `nohup` 래퍼와 로그 파일로 돌아 재시작을 견딘다. 명령 문자열은 컨트롤러에서 완성되니 비밀값은 작은따옴표로 넘긴다.
-- 파드의 컨테이너는 workspace 볼륨을 같이 쓴다. 노드에 dockerd가 없어 kaniko로 이미지를 만들고, 한 컨테이너면 `--ignore-path`로 workspace를 지킨다.
-- 반복되는 빌드 코드는 Shared Library로 모은다. 글로벌 라이브러리는 샌드박스 밖에서 돌아 push 권한이 관리자 권한이다.
-- 권한은 역할 표와 함께 `Job/Configure`와 자격증명 범위까지 본다.
 
 ## 참고
 

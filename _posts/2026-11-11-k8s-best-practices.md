@@ -7,6 +7,15 @@ tags: [kubernetes, probe, rolling-update, graceful-shutdown, pdb, topology-sprea
 scripts: [figures/k8s-best-practices.js]
 ---
 
+## 요약
+
+- Service는 EndpointSlice의 `ready` 엔드포인트로만 보낸다. readiness probe가 없으면 컨테이너는 시작하자마자 그 목록에 들어간다.
+- liveness 기본값(10초, 1초, 3번)은 느림과 멈춤을 구별하지 못해 부하 때 연쇄 재시작을 부른다. 느린 기동은 startup probe로 기다린다.
+- 롤링 업데이트는 maxSurge를 올림, maxUnavailable을 내림한다. replicas 4부터 기본값이 가용 파드를 줄이고, readiness가 롤아웃 속도를 정한다.
+- 삭제되면 SIGTERM과 규칙 제거가 동시에 시작된다. preStop 대기로 규칙에서 먼저 빠지고, 앱은 SIGTERM에 처리 중인 요청을 끝낸다.
+- drain은 Eviction API를 쓰고, PDB가 429로 동시에 내려가는 수를 막는다. 직접 삭제와 롤링 업데이트는 PDB를 거치지 않는다.
+- 노드 장애는 PDB로 막지 못한다. topology spread로 노드와 존에 나눠 두고, `pod-template-hash`로 버전별로 센다.
+
 ## 엔드포인트와 readiness
 
 파드를 지우고 새로 띄우는 동안 요청이 하나도 실패하지 않으려면 트래픽을 보내는 쪽이 파드의 상태를 정확히 따라가야 한다. 트래픽을 보내는 쪽은 Service인데, Service는 파드 목록을 직접 들고 있지 않다.
@@ -260,15 +269,6 @@ topologySpreadConstraints:
 - pod anti-affinity를 required로 두어도 노드마다 하나씩 놓을 수 있다. 다만 노드보다 replicas가 많으면 남는 파드가 Pending이 되고, 계산이 무거워 공식 문서는 노드가 수백 개를 넘는 클러스터에서 권하지 않는다.
 
 분산은 스케줄할 때만 맞춘다. 스케일 다운이나 노드 교체 뒤 다시 한쪽으로 쏠려도 스케줄러는 옮기지 않고, 다시 맞추려면 Descheduler 같은 도구가 파드를 내보내 재배치하게 한다.
-
-## 정리
-
-- Service는 EndpointSlice의 `ready` 엔드포인트로만 보낸다. readiness probe가 없으면 컨테이너는 시작하자마자 그 목록에 들어간다.
-- liveness 기본값(10초, 1초, 3번)은 느림과 멈춤을 구별하지 못해 부하 때 연쇄 재시작을 부른다. 느린 기동은 startup probe로 기다린다.
-- 롤링 업데이트는 maxSurge를 올림, maxUnavailable을 내림한다. replicas 4부터 기본값이 가용 파드를 줄이고, readiness가 롤아웃 속도를 정한다.
-- 삭제되면 SIGTERM과 규칙 제거가 동시에 시작된다. preStop 대기로 규칙에서 먼저 빠지고, 앱은 SIGTERM에 처리 중인 요청을 끝낸다.
-- drain은 Eviction API를 쓰고, PDB가 429로 동시에 내려가는 수를 막는다. 직접 삭제와 롤링 업데이트는 PDB를 거치지 않는다.
-- 노드 장애는 PDB로 막지 못한다. topology spread로 노드와 존에 나눠 두고, `pod-template-hash`로 버전별로 센다.
 
 버전과 기본값은 2026년 11월 쿠버네티스 문서로 확인했다.
 

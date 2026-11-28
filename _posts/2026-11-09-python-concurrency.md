@@ -7,6 +7,15 @@ tags: [python, gil, asyncio, fastapi, uvicorn, kubernetes]
 scripts: [figures/python-concurrency.js]
 ---
 
+## 요약
+
+- CPython 프로세스 하나에서 Python 코드는 GIL을 쥔 스레드 하나만 실행하고, 기다리는 스레드가 있으면 약 5ms마다 GIL을 넘긴다.
+- 블로킹 I/O와 일부 C 코드는 GIL을 놓으므로, 스레드는 대기를 겹치는 데 쓸모 있지만 Python 계산은 빨라지지 않는다.
+- asyncio는 스레드 하나가 epoll로 대기를 겹치고, await 없이 기다리는 호출 하나가 루프 전체를 멈춘다.
+- Uvicorn은 요청마다 태스크를 만들고, FastAPI의 `def` 엔드포인트는 AnyIO 스레드 풀(기본 40칸)에서 돈다.
+- 여러 vCPU는 워커 프로세스로 쓰고, 쿠버네티스에서는 컨테이너당 프로세스 하나에 request와 풀 크기를 맞춘다.
+- free-threaded 빌드(3.14 공식 지원)는 GIL을 없애지만, 단일 스레드 비용과 C 확장 지원을 함께 따진다.
+
 ## GIL과 스레드
 
 Python 서버 프로세스 하나에 요청 100개가 한꺼번에 들어와도, 그중 Python 코드를 실행하는 것은 한 순간에 하나다. 나머지는 무언가를 기다리고 있어야 동시 처리가 성립한다.
@@ -224,14 +233,6 @@ GIL을 없앤 값은 단일 스레드 속도와 호환성으로 치른다.
 
 GIL이 없어도 `count += 1` 경합은 그대로라 락은 직접 건다. 쓰는 C 확장(DB 드라이버, 수치 계산 라이브러리)이 모두 free-threading을 지원해야 워커 프로세스 대신 스레드로 vCPU 여러 개를 쓸 수 있다.
 
-## 정리
-
-- CPython 프로세스 하나에서 Python 코드는 GIL을 쥔 스레드 하나만 실행하고, 기다리는 스레드가 있으면 약 5ms마다 GIL을 넘긴다.
-- 블로킹 I/O와 일부 C 코드는 GIL을 놓으므로, 스레드는 대기를 겹치는 데 쓸모 있지만 Python 계산은 빨라지지 않는다.
-- asyncio는 스레드 하나가 epoll로 대기를 겹치고, await 없이 기다리는 호출 하나가 루프 전체를 멈춘다.
-- Uvicorn은 요청마다 태스크를 만들고, FastAPI의 `def` 엔드포인트는 AnyIO 스레드 풀(기본 40칸)에서 돈다.
-- 여러 vCPU는 워커 프로세스로 쓰고, 쿠버네티스에서는 컨테이너당 프로세스 하나에 request와 풀 크기를 맞춘다.
-- free-threaded 빌드(3.14 공식 지원)는 GIL을 없애지만, 단일 스레드 비용과 C 확장 지원을 함께 따진다.
 
 ## 참고
 

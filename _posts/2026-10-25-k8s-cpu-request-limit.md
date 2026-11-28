@@ -7,6 +7,15 @@ tags: [cpu, kubernetes, cgroup, linux, nodejs]
 scripts: [figures/cpu.js]
 ---
 
+## 요약
+
+- 스케줄러: 덜 쓴 스레드에게 약 3ms씩 차례를 준다. 계산 스레드가 vCPU보다 많으면 스위칭 비용이 커진다.
+- request: 경합 때 weight 비율로 나눠 받을 몫, kube-scheduler의 배치 기준. 남는 CPU는 더 쓴다. 실측으로 꼭 정한다.
+- limit: 100ms마다 쓸 CPU 시간의 합, 5ms 조각으로 나눠 준다. 다 쓰면 노드 CPU가 남아도 멈춘다.
+- 진단: CPU 때문에 느린지는 `cpu.pressure`, 쓰로틀인지는 `nr_throttled ÷ nr_periods`. 사용률 그래프로는 둘 다 잘 안 보인다.
+- Node.js: JS는 메인 스레드 하나, 대기는 epoll이 맡는다. 콜백 하나가 오래 잡으면 전부 멈춘다. GC 때문에 1000m을 넘는다.
+- limit 제거: 쓰로틀이 없어진다. 런타임이 노드 코어 수를 보지 않게 CPU 수를 직접 정한다.
+
 ## CPU 시간과 기다림
 
 CPU는 메모리에서 명령을 가져와 해석하고, 실행하고, 결과를 적는 일을 1초에 수십억 번 반복한다. 부품의 역할은 밭에서 일하는 일꾼으로 보면 잡기 쉽다.
@@ -222,16 +231,6 @@ limit을 뺄 때는 런타임이 "쓸 수 있는 CPU 수"를 어떻게 정하는
 
 64코어 노드에서 request 500m인 파드가 스레드 64개를 띄우면, 경합 때 보장받는 CPU는 0.5코어인데 스레드 64개가 그 몫을 나눠 쓰니 스위칭과 GC 비용만 커진다. limit을 뺐다면 Go의 `GOMAXPROCS`, JVM의 `-XX:ActiveProcessorCount`, Node의 워커 수를 request에 맞춰 직접 정한다.
 
-## 정리
-
-| | 하는 일 | 기억할 점 |
-|---|---|---|
-| 스케줄러 | 덜 쓴 스레드에게 약 3ms씩 차례를 준다 | 계산 스레드가 vCPU보다 많으면 스위칭 비용이 커진다 |
-| request | 경합 때 weight 비율로 나눠 받을 몫, kube-scheduler의 배치 기준 | 남는 CPU는 더 쓴다. 실측으로 꼭 정한다 |
-| limit | 100ms마다 쓸 CPU 시간의 합, 5ms 조각으로 나눠 준다 | 다 쓰면 노드 CPU가 남아도 멈춘다 |
-| 진단 | CPU 때문에 느린지는 `cpu.pressure`, 쓰로틀인지는 `nr_throttled ÷ nr_periods` | 사용률 그래프로는 둘 다 잘 안 보인다 |
-| Node.js | JS는 메인 스레드 하나, 대기는 epoll이 맡는다 | 콜백 하나가 오래 잡으면 전부 멈춘다. GC 때문에 1000m을 넘는다 |
-| limit 제거 | 쓰로틀이 없어진다 | 런타임이 노드 코어 수를 보지 않게 CPU 수를 직접 정한다 |
 
 ## 참고
 
