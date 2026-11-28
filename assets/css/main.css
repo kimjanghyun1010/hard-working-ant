@@ -20,7 +20,7 @@
   --mono: "JetBrains Mono", "Noto Sans KR", ui-monospace, SFMono-Regular, Menlo, monospace;
   --header-h: 56px;
   --nav-w: 264px;
-  --s0: #0c66e4; --s1: #6e5dc6; --s2: #22a06b; --s3: #e56910; --s4: #c9372c;
+  --s0: #0c66e4; --s1: #6e5dc6; --s2: #22a06b; --s3: #e56910; --s4: #c9372c; --s5: #1d7f8c;
 }
 
 * { box-sizing: border-box; }

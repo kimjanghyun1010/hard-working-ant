@@ -30,6 +30,7 @@ exclude:
 series_order:
   - Back to the Basic
   - Kubernetes
+  - 데이터베이스
   - 인프라 운영
   - CI/CD와 IaC
   - AI와 자동화
