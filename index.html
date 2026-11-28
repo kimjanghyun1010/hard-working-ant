@@ -2,14 +2,8 @@
 layout: default
 ---
 <div class="page">
-  <div class="space-head">
-    <svg width="56" height="56" viewBox="0 0 26 26" aria-hidden="true"><rect width="26" height="26" rx="5" fill="#0c66e4"/><g fill="#fff"><circle cx="7.4" cy="13" r="2"/><circle cx="12" cy="13" r="2.4"/><ellipse cx="18" cy="13" rx="3.4" ry="2.8"/></g></svg>
-    <div>
-      <h1 class="post-title">hard-working-ant</h1>
-      <p class="post-lede">{{ site.description }}, 글 {{ site.posts.size }}편</p>
-    </div>
-  </div>
-  <h2 class="list-head">최근 업데이트</h2>
+  <h1 class="post-title">최근 업데이트</h1>
+  <p class="post-lede">{{ site.description }}, 글 {{ site.posts.size }}편</p>
   <ul class="post-list">
     {%- for p in site.posts %}
     {% include post-item.html post=p %}

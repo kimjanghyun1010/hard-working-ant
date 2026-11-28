@@ -148,6 +148,20 @@
     if (e.key === 'ArrowUp') { e.preventDefault(); (a.previousElementSibling?.querySelector('a') || input).focus(); }
   });
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+  const navBtn = document.querySelector('[data-nav-toggle]');
+  const syncNav = () => {
+    const closed = document.documentElement.dataset.nav === 'closed';
+    navBtn?.setAttribute('aria-expanded', !closed);
+    navBtn?.setAttribute('aria-label', closed ? '사이드바 펼치기' : '사이드바 접기');
+  };
+  navBtn?.addEventListener('click', () => {
+    const root = document.documentElement;
+    if (root.dataset.nav === 'closed') delete root.dataset.nav; else root.dataset.nav = 'closed';
+    try { localStorage.setItem('nav', root.dataset.nav || 'open'); } catch (e) {}
+    syncNav();
+  });
+  syncNav();
+
   document.querySelectorAll('[data-search-open]').forEach((b) => b.addEventListener('click', open));
   document.addEventListener('keydown', (e) => {
     const el = document.activeElement;

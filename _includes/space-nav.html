@@ -1,10 +1,6 @@
 {%- assign groups = site.posts | where_exp: "p", "p.series" | group_by: "series" -%}
 {%- assign loose = site.posts | where_exp: "p", "p.series == nil" -%}
 <aside class="space-nav" aria-label="블로그 페이지">
-  <a class="space" href="{{ '/' | relative_url }}">
-    <svg width="32" height="32" viewBox="0 0 26 26" aria-hidden="true"><rect width="26" height="26" rx="6" fill="#0c66e4"/><g fill="#fff"><circle cx="7.4" cy="13" r="2"/><circle cx="12" cy="13" r="2.4"/><ellipse cx="18" cy="13" rx="3.4" ry="2.8"/></g></svg>
-    <span><b>hard-working-ant</b><small>{{ site.description }}</small></span>
-  </a>
   <nav class="space-links">
     <a class="i-home" href="{{ '/' | relative_url }}"{% if page.url == '/' %} aria-current="page"{% endif %}>개요</a>
     <a class="i-series" href="{{ '/series/' | relative_url }}"{% if page.url == '/series/' %} aria-current="page"{% endif %}>시리즈</a>
