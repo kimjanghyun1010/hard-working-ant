@@ -183,7 +183,6 @@
         const N = NS[ui.mode], q = Math.floor(N / 2) + 1, run = ui.runAt === null ? -1 : time - ui.runAt;
         const dead = run < K1 ? 0 : run < K2 ? 1 : 2, alive = N - dead, ok = alive >= q;
         C.pill(ctx, 0, 0, run < 0 ? '쓰기 정상' : ok ? `쓰기 정상, ${dead}대 고장` : '쓰기 멈춤', ok ? 'ok' : 'bad');
-        C.text(ctx, `살아 있음 ${alive}/${N}, 과반 ${q}`, w, 11, { size: 10, weight: 600, color: ok ? U.text : U.red, align: 'right', base: 'middle' });
         const aw = w < 480 ? 60 : 84, A = { x: 0, y: 86, w: aw, h: 46, t: 'API 서버', size: 11 };
         const gx = aw + 22, gw = w - gx, mw = Math.min(84, (gw - 20 - (N - 1) * 8) / N);
         const M = Array.from({ length: N }, (_, j) => ({ x: gx + 10 + j * (mw + 8), y: 76, w: mw, h: 66 }));
@@ -192,18 +191,16 @@
         const gone = (j) => (j === N - 1 ? ease(run, K1, K1 + 0.4) : j === N - 2 ? ease(run, K2, K2 + 0.4) : 0);
         M.forEach((b, j) => {
           const g = run < 0 ? 0 : gone(j);
-          if (g >= 0.5) unit(ctx, b, `etcd-${j + 1}`, '꺼짐', { col: [U.plot, U.muted, RED[2]], dash: [3, 3] });
-          else unit(ctx, b, `etcd-${j + 1}`, !ok ? '쓰기 불가' : j ? '팔로워' : '리더', { col: !ok ? ORANGE : j ? ['#fff', U.text, U.grid] : BLUE });
-          const cx = b.x + b.w / 2, alive1 = g < 0.5;
-          ctx.fillStyle = alive1 ? GREEN[2] : RED[0];
-          ctx.beginPath(); ctx.roundRect(b.x, 156, b.w, 14, 4); ctx.fill();
-          if (!alive1) { ctx.strokeStyle = RED[2]; ctx.setLineDash([3, 2]); ctx.stroke(); ctx.setLineDash([]); }
-          if (j === 0) C.text(ctx, '살아 있는 멤버', b.x, 186, { size: 10 });
-          if (g > 0 && g < 1) C.stamp(ctx, cx, b.y + b.h / 2, '꺼짐', 'bad', 1 - Math.abs(g - 0.5) * 2);
+          // Up is the default look; only a down member is drawn, red and hatched.
+          if (g >= 0.5) {
+            ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 7);
+            ctx.fillStyle = RED[0]; ctx.fill(); ctx.fillStyle = C.hatch(ctx, '#fecaca'); ctx.fill();
+            unit(ctx, b, `etcd-${j + 1}`, '꺼짐', { col: ['transparent', RED[1], RED[1]], dash: [3, 3], subColor: RED[1] });
+          } else unit(ctx, b, `etcd-${j + 1}`, !ok ? '쓰기 불가' : j ? '팔로워' : '리더', { col: !ok ? ORANGE : j ? ['#fff', U.text, U.grid] : BLUE });
+          if (g > 0 && g < 1) C.stamp(ctx, b.x + b.w / 2, b.y + b.h / 2, '꺼짐', 'bad', 1 - Math.abs(g - 0.5) * 2);
         });
-        const qx = M[q - 1].x + mw + 4;
-        C.dashed(ctx, qx, 150, qx, 176, U.red);
-        C.text(ctx, `과반 ${q}`, qx + 4, 186, { size: 10, weight: 700, color: U.red });
+        C.text(ctx, ok ? `남은 ${alive}대 ≥ 과반 ${q}대 → 쓰기 가능` : `남은 ${alive}대 < 과반 ${q}대 → 쓰기 멈춤`, gx + gw / 2, 172,
+          { size: w < 420 ? 11 : 12, weight: 600, color: ok ? U.text : U.red, align: 'center', base: 'middle' });
         // Writes: API to the leader, then the leader copies to the followers that are still up.
         const ph = (time % P) / P, L = M[0], ly = A.y + A.h / 2;
         if (ph < 0.45) tag(ctx, 'PUT', ...mix([aw + 22, ly], [L.x - 16, ly], hwa.smooth(ph / 0.45)), BLUE);
