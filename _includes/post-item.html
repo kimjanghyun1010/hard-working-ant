@@ -4,6 +4,7 @@
   <p>{{ include.post.description }}</p>
   {%- endif %}
   <div class="meta">
+    <span class="who"><span class="avatar" aria-hidden="true">{{ site.author | slice: 0 | upcase }}</span>{{ site.author }}</span>
     <time datetime="{{ include.post.date | date_to_xmlschema }}">{{ include.post.date | date: "%Y-%m-%d" }}</time>
     {%- if include.post.series %}<span>{{ include.post.series }}</span>{% endif %}
     {%- for t in include.post.tags %}<span class="tag">{{ t }}</span>{% endfor %}
