@@ -104,7 +104,7 @@
         const lit = new Set([step[0]]);
         if (f > 0.9) lit.add(step[1]);
         const pods = [...EXIST];
-        if (cur >= 5) pods.push([0, 2, 'pod', cur === 6 && f > 0.9 ? GREEN : ORANGE, { dash: cur === 6 && f > 0.9 ? null : [3, 2] }]);
+        if (cur >= 5) pods.push([0, 2, '새 pod', cur === 6 && f > 0.9 ? BLUE : ORANGE, { dash: cur === 6 && f > 0.9 ? null : [3, 2] }]);
         const B = clusterMap(ctx, w, y0, { lit, pods }), P = routes(B, y0), rev = (p) => p.slice().reverse();
         const L = B.kubelet0, R = B.rt0;
         const path = {
@@ -155,9 +155,9 @@
           : i === 1 ? [[kw, lane], [E.x - 20, lane]] : [[kw, lane], [sx(1) + sw / 2, lane]];
         const k = ease(t, 0.3, 3.3), p = at(path, k), down = i === 0 && p[1] > lane + 1;
         STAGE.forEach(([name, sub], j) => {
-          const b = { x: sx(j), y: 92, w: sw, h: 46 }, passed = p[0] > b.x + b.w / 2 && !down, here = !down && p[0] >= b.x && p[0] <= b.x + b.w + 6;
+          const b = { x: sx(j), y: 92, w: sw, h: 46 }, here = !down && p[0] >= b.x && p[0] <= b.x + b.w + 6;
           const skip = i === 0 && j >= 2 && (down || k >= 1), deny = i === 2 && j === 1 && k >= 1;
-          const col = deny ? RED : passed || (here && k >= 1) ? GREEN : skip ? GRAY : ['#fff', U.text, U.grid];
+          const col = deny ? RED : skip ? GRAY : ['#fff', U.text, U.grid];
           unit(ctx, b, name, skip ? '건너뜀' : sub, { col, dash: skip ? [3, 3] : null, lit: here && !deny && k < 1, size: w < 420 ? 10 : 12, subSize: w < 420 ? 9 : 10 });
           C.line(ctx, [[b.x + b.w / 2, lane + 3], [b.x + b.w / 2, b.y]], LINE, 1);
         });
@@ -231,13 +231,13 @@
     ctx.fillRect(bx, by, X(node.req) - bx, 12);
     if (use) { C.dashed(ctx, X(node.use), by - 4, X(node.use), by + 16, '#f59e0b'); }
     if (r) {
-      const fits = node.req + r.v <= CAP, x0 = X(node.req), x1 = Math.min(X(node.req + r.v), bx + bw + 6);
+      const fits = !r.bad && node.req + r.v <= CAP, x0 = X(node.req), x1 = Math.min(X(node.req + r.v), bx + bw + 6);
       ctx.save();
       ctx.globalAlpha *= r.k;
-      ctx.fillStyle = r.solid ? GREEN[2] : fits ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)';
+      ctx.fillStyle = r.solid ? BLUE[2] : fits ? 'rgba(59,130,246,0.18)' : 'rgba(239,68,68,0.18)';
       ctx.fillRect(x0, by - 2, x1 - x0, 16);
       ctx.setLineDash([3, 2]);
-      ctx.strokeStyle = fits ? '#16a34a' : U.red;
+      ctx.strokeStyle = fits ? U.blue : U.red;
       ctx.strokeRect(x0 + 0.5, by - 1.5, x1 - x0 - 1, 15);
       ctx.restore();
     }
@@ -263,11 +263,10 @@
           const b = { x: rx, y: 36 + j * 46, w: w - rx, h: 40 }, tj = 0.5 + j * 0.9, judged = i > 0 || t >= tj + 0.5;
           const a = nd.why && (i > 0 || t >= tj + 0.8) ? 0.45 : 1, chosen = i === 2 && nd.n === 'node-3';
           const tryK = i === 0 ? ease(t, tj, tj + 0.4) : nd.why ? 0 : 1;
-          const g = nodeRow(ctx, b, nd, { a, lit: chosen && t > 2.4, try: tryK > 0 && !(chosen && t > 2.4) ? { v: R, k: tryK } : chosen && t > 2.4 ? { v: R, k: 1, solid: true } : null });
+          const g = nodeRow(ctx, b, nd, { a, lit: chosen && t > 2.4, try: tryK > 0 && !(chosen && t > 2.4) ? { v: R, k: tryK, bad: !!nd.why } : chosen && t > 2.4 ? { v: R, k: 1, solid: true } : null });
           if (!judged) return;
           if (nd.why) fade(ctx, a, () => C.chip(ctx, nd.why, g.right, g.cy, 'bad', i ? 1 : ease(t, tj + 0.5, tj + 0.8)));
-          else if (i === 0) C.chip(ctx, '통과', g.right, g.cy, 'ok', ease(t, tj + 0.5, tj + 0.8));
-          else {
+          else if (i > 0) {
             const k = i === 1 ? ease(t, 0.4 + j * 0.5, 1.6 + j * 0.5) : 1;
             ctx.fillStyle = U.purple;
             ctx.fillRect(g.bx, b.y + b.h - 7, g.bw * (nd.score / 100) * k, 3);
@@ -277,7 +276,7 @@
         if (i === 2) {
           const g = rowGeo({ x: rx, y: 36 + 2 * 46, w: w - rx, h: 40 }), k = ease(t, 0.6, 2.4);
           if (k < 1) tag(ctx, '500m', ...mix([pw / 2, pod.y + pod.h / 2], [(g.X(1) + g.X(1.5)) / 2, g.cy], k), BLUE);
-          tag(ctx, 'nodeName: node-3', Math.max(pw / 2, 52), 170, GREEN, { a: ease(t, 2.6, 3.0), size: 9 });
+          tag(ctx, 'nodeName: node-3', Math.max(pw / 2, 52), 170, BLUE, { a: ease(t, 2.6, 3.0), size: 9 });
           C.stamp(ctx, rx + (w - rx) / 2, 230, 'node-3에 바인딩', 'ok', (t - 3.4) / 0.4);
         }
         say(notes[i]);
@@ -304,7 +303,7 @@
           const b = { x: rx, y: 40 + j * 54, w: w - rx, h: 46 }, tj = 0.5 + j * 0.9, k = run < 0 ? 0 : ease(run, tj, tj + 0.4), fits = nd.req + R <= CAP;
           const placed = target === nd && run >= 4.4;
           const g = nodeRow(ctx, b, nd, { use: true, lit: placed, try: placed ? { v: R, k: 1, solid: true } : k > 0 ? { v: R, k } : null });
-          if (run >= tj + 0.5) C.chip(ctx, fits ? '들어감' : '자리 없음', g.right, g.cy, fits ? 'ok' : 'bad', ease(run, tj + 0.5, tj + 0.8));
+          if (run >= tj + 0.5 && !fits) C.chip(ctx, '자리 없음', g.right, g.cy, 'bad', ease(run, tj + 0.5, tj + 0.8));
         });
         if (target && run >= 3.6 && run < 4.4) {
           const j = NODES.indexOf(target), g = rowGeo({ x: rx, y: 40 + j * 54, w: w - rx, h: 46 });
@@ -388,7 +387,7 @@
           const b = { x: 8 + j * (pw + 8), y: 148, w: pw, h: 54 };
           if (dep) C.dashed(ctx, b.x + pw / 2, cb.y + cb.h, b.x + pw / 2, b.y, LINE);
           if (j === 1 && del > 0) {
-            if (born) unit(ctx, b, NEW, ready ? 'Running' : '생성 중', { col: ready ? GREEN : ORANGE, dash: ready ? null : [3, 2], size: 10 });
+            if (born) unit(ctx, b, NEW, ready ? 'Running' : '생성 중', { col: ready ? BLUE : ORANGE, dash: ready ? null : [3, 2], size: 10 });
             else if (del < 1) fade(ctx, 1 - del * 0.7, () => unit(ctx, b, s, '삭제 중', { col: RED, size: 10 }));
             else C.box(ctx, b.x, b.y, b.w, b.h, { fill: U.plot, dash: [3, 3], r: 7 });
             return;

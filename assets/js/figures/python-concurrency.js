@@ -197,8 +197,7 @@
         C.text(ctx, 'DB', dbx + dbw / 2, top + H / 2, { size: 11, weight: 600, color: U.text, align: 'center', base: 'middle' });
         C.box(ctx, L.x, L.y, L.w, L.h, { fill: blocked ? '#fef2f2' : '#fff', stroke: blocked ? U.red : U.grid });
         C.text(ctx, '이벤트 루프', L.x + 8, L.y + 14, { size: 10, weight: 600, color: U.text });
-        const state = blocked ? 'A가 붙잡음' : i < 2 && t >= 1.0 && t < 5.2 ? '막히지 않음' : '';
-        if (state) C.text(ctx, state, L.x + L.w - 8, L.y + 14, { size: 10, weight: 700, color: blocked ? U.red : OK[1], align: 'right' });
+        if (blocked) C.text(ctx, 'A가 붙잡음', L.x + L.w - 8, L.y + 14, { size: 10, weight: 700, color: U.red, align: 'right' });
         C.box(ctx, P.x, P.y, P.w, P.h, { fill: '#fff' });
         C.text(ctx, w >= 420 ? '스레드 풀 (기본 40개)' : '스레드 풀 40개', P.x + 8, P.y + 14, { size: 10, weight: 600, color: U.text });
         const cs = Math.min(14, (P.w - 16 - 27) / 10), gx = P.x + (P.w - (cs * 10 + 27)) / 2, cell = (c) => [gx + (c % 10) * (cs + 3), P.y + 26 + Math.floor(c / 10) * (cs + 3)];

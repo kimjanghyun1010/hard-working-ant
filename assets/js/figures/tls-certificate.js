@@ -6,7 +6,7 @@
   const mix = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
   const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
   const BLUE = ['#dbeafe', '#1d4ed8', '#93c5fd'], GREEN = ['#dcfce7', '#15803d', '#86efac'], ORANGE = ['#fef3c7', '#b45309', '#fcd34d'];
-  const RED = ['#fee2e2', '#dc2626', '#fca5a5'], PURPLE = ['#ede9fe', '#6d28d9', '#c4b5fd'], MUTE = [U.cell, U.muted, '#e2e8f0'];
+  const RED = ['#fee2e2', '#dc2626', '#fca5a5'], PURPLE = ['#ede9fe', '#6d28d9', '#c4b5fd'], MUTE = [U.cell, U.muted, '#e2e8f0'], WHITE = ['#fff', U.text, U.grid];
 
   const lock = (ctx, x, y, c) => {
     ctx.fillStyle = c;
@@ -394,7 +394,7 @@
           C.text(ctx, label, gx + 16, y + 15, { size: 10, weight: 600, color: U.text, base: 'middle' });
         });
         const v1 = mv(k, 0.3, 0.38), v2 = mv(k, 0.45, 0.55), v3 = mv(k, 0.66, 0.76), lx = (s) => gx + 16 + tagW(ctx, s) / 2;
-        tag(ctx, '서명 맞음', lx('서명 맞음'), ST[0][0] + 31, GREEN, { a: v1 });
+        tag(ctx, '서명 맞음', lx('서명 맞음'), ST[0][0] + 31, WHITE, { a: v1 });
         if (sc.leak && tagW(ctx, '서명 맞음') + tagW(ctx, '폐기 확인 없음') + 40 < gw) tag(ctx, '폐기 확인 없음', gx + 22 + tagW(ctx, '서명 맞음') + tagW(ctx, '폐기 확인 없음') / 2, ST[0][0] + 31, RED, { a: v1 });
         ctx.globalAlpha = v2;
         C.text(ctx, `user  ${sc.cn}`, gx + 16, ST[1][0] + 34, { size: 10, weight: 600, color: sc.col[1], base: 'middle' });

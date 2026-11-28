@@ -7,7 +7,7 @@
   // Chip colours as [background, text, border].
   const T = {
     blue: ['#dbeafe', '#1d4ed8', '#93c5fd'], orange: ['#fef3c7', '#b45309', '#fcd34d'], red: ['#fee2e2', '#dc2626', '#fca5a5'],
-    green: ['#dcfce7', '#15803d', '#86efac'], gray: [U.cell, U.muted, '#e2e8f0'], white: ['#fff', U.text, '#cbd5e1'],
+    gray: [U.cell, U.muted, '#e2e8f0'], white: ['#fff', U.text, '#cbd5e1'],
   };
   const tag = (ctx, s, x, cy, col, { a = 1, size = 10, align = 'center', h = 18 } = {}) => {
     if (a <= 0) return 0;
@@ -196,12 +196,12 @@
             if (t < MADE) return;
             endpoint(ctx, M, j, name, t >= join ? 'on' : 'off', t >= join ? (wide ? ['10.0.1.7', U.muted] : null) : ['준비 안 됨', T.orange[1]]);
           });
-          [0, 1].forEach((j) => pod(ctx, M.card(j), `파드 ${'AB'[j]}`, '준비', T.green));
+          [0, 1].forEach((j) => pod(ctx, M.card(j), `파드 ${'AB'[j]}`));
           const c = M.card(2);
           if (t < MADE) C.box(ctx, c.x, c.y, c.w, c.h, { fill: U.plot, dash: [4, 3], r: 7 });
           else {
             const ready = t >= READY;
-            pod(ctx, c, '파드 C', ready ? '준비' : '기동 중', ready ? T.green : T.orange, { fill: ready ? '#fff' : '#fffbeb', stroke: ready ? U.grid : T.orange[2] });
+            pod(ctx, c, '파드 C', ready ? null : '기동 중', T.orange, { fill: ready ? '#fff' : '#fffbeb', stroke: ready ? U.grid : T.orange[2] });
             if (!ready) { const f = clamp((t - MADE) / (READY - MADE)); ctx.fillStyle = '#f59e0b'; ctx.fillRect(c.x + 8, c.y + c.h - 6, (c.w - 16) * f, 2.5); }
           }
           flow(ctx, M, t, qs, pick, fail);
@@ -240,7 +240,7 @@
             endpoint(ctx, M, j, name, dn ? 'out' : 'on', dn ? ['빠짐', U.muted] : null);
             const slow = l !== null && l > 1, f = fails(j);
             const sub = dn ? '재시작 대기' : `응답 ${l.toFixed(1)}초${f && !dn ? `, 실패 ${f}/3` : ''}`;
-            pod(ctx, M.card(j), `파드 ${name}`, dn ? '재시작' : slow ? '느림' : '정상', dn ? T.red : slow ? T.orange : T.green,
+            pod(ctx, M.card(j), `파드 ${name}`, dn ? '재시작' : slow ? '느림' : null, dn ? T.red : T.orange,
               { sub, fill: dn ? U.plot : '#fff', dash: dn ? [4, 3] : null, dim: dn });
           });
           flow(ctx, M, now, qs, pick, fail);
@@ -271,10 +271,10 @@
           frameMap(ctx, M, wide ? '노드의 kube-proxy 규칙' : 'kube-proxy', '파드');
           endpoint(ctx, M, 0, 'A', on && r >= OUT ? 'out' : 'on', on && r >= OUT ? ['빠짐', U.muted] : null);
           endpoint(ctx, M, 1, 'B', 'on');
-          const st = !on ? ['서비스', T.green, null] : r < m.term ? ['preStop', T.orange, '요청 계속 처리'] : r < m.down ? ['SIGTERM', T.red, '종료 중'] : ['종료됨', T.gray, '프로세스 없음'];
+          const st = !on ? [null, null, null] : r < m.term ? ['preStop', T.orange, '요청 계속 처리'] : r < m.down ? ['SIGTERM', T.red, '종료 중'] : ['종료됨', T.gray, '프로세스 없음'];
           const gone = on && r >= m.down;
           pod(ctx, M.card(0), '파드 A', st[0], st[1], { sub: st[2], fill: gone ? U.plot : '#fff', dash: gone ? [4, 3] : null, dim: gone });
-          pod(ctx, M.card(1), '파드 B', '서비스', T.green);
+          pod(ctx, M.card(1), '파드 B');
           flow(ctx, M, now, qs, pick, fail);
           // Mini time axis: when A stops against when it leaves the rules.
           const ax = 8, bx = w - 8, ay = M.bottom + 26, X = (v) => ax + (v / END) * (bx - ax);
@@ -318,7 +318,7 @@
     const slotPod = (ctx, b, p) => {
       if (!p) return C.box(ctx, b.x, b.y, b.w, b.h, { fill: '#fff', dash: [3, 3], stroke: '#e2e8f0', r: 6 });
       const S = {
-        ready: ['준비', T.green, {}], start: ['기동 중', T.orange, { fill: '#fffbeb', stroke: T.orange[2] }], stop: ['종료 중', T.gray, { fill: U.plot, dash: [4, 3], dim: true }],
+        ready: ['', null, {}], start: ['기동 중', T.orange, { fill: '#fffbeb', stroke: T.orange[2] }], stop: ['종료 중', T.gray, { fill: U.plot, dash: [4, 3], dim: true }],
         deny: ['거부됨', T.red, { stroke: T.red[2] }], dead: ['멈춤', T.red, { fill: U.plot, dash: [4, 3], dim: true }], other: ['', T.gray, { fill: U.plot, dim: true }],
       }[p.st];
       pod(ctx, b, p.name, S[0], S[1], S[2]);

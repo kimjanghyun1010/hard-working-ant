@@ -75,7 +75,7 @@
 
   // Timeline lanes: blocks for work, double arrows for waits. demo turns scenes into modes played once by the run button.
   {
-    const FILL = { inst: '#f59e0b', run: U.blue, read: '#8b5cf6', write: '#14b8a6', v: '#e2e8f0', lost: '#fecaca', ok: '#22c55e' };
+    const FILL = { inst: '#f59e0b', run: U.blue, read: '#8b5cf6', write: '#14b8a6', v: '#e2e8f0', lost: '#fecaca' };
     const DARK = { v: U.text, lost: '#b91c1c' };
     const ARC = { wait: '#b45309' };
     const dbl = (ctx, x0, x1, y, color) => {
@@ -153,10 +153,10 @@
     const rt = [[5, '5초'], [10, '10초'], [15, '15초']], rl = ['옛 VM', '새 VM', '서비스'], rg = [['inst', '생성'], ['run', '실행'], ['lost', '삭제']];
     tl('replace', [
       { pill: '지우고 만들기', tone: 'bad', span: 20, unit: '초', ticks: rt, lanes: rl, legend: rg,
-        segs: [[0, 0, 2, 'run', ''], [0, 2, 5, 'lost', '삭제'], [1, 5, 13, 'inst', ''], [1, 13, 20, 'run', '실행'], [2, 0, 2, 'ok', ''], [2, 2, 13, 'lost', '중단'], [2, 13, 20, 'ok', '']],
+        segs: [[0, 0, 2, 'run', ''], [0, 2, 5, 'lost', '삭제'], [1, 5, 13, 'inst', ''], [1, 13, 20, 'run', '실행'], [2, 0, 2, 'v', ''], [2, 2, 13, 'lost', '중단'], [2, 13, 20, 'v', '']],
         event: [2, 'apply 시작'], stamp: ['11초 중단', 'bad'], say: '기본 순서는 옛 VM을 먼저 지우고 새 VM을 만들어, 그 사이 서비스가 끊긴다.' },
       { pill: '만들고 지우기', tone: 'ok', span: 20, unit: '초', ticks: rt, lanes: rl, legend: rg,
-        segs: [[0, 0, 10, 'run', '실행'], [0, 10, 13, 'lost', '삭제'], [1, 2, 10, 'inst', ''], [1, 10, 20, 'run', '실행'], [2, 0, 20, 'ok', '']],
+        segs: [[0, 0, 10, 'run', '실행'], [0, 10, 13, 'lost', '삭제'], [1, 2, 10, 'inst', ''], [1, 10, 20, 'run', '실행'], [2, 0, 20, 'v', '']],
         event: [2, 'apply 시작', U.blue], stamp: ['중단 없음', 'ok'], say: 'create_before_destroy는 새 VM을 먼저 만들고 옛 VM을 지워, 두 대가 잠시 함께 있다.' },
     ]);
 
@@ -280,7 +280,7 @@
           ctx.beginPath(); ctx.roundRect(rx + 4, y - 12, rw - 8, 24, 5); ctx.fillStyle = hit ? hwa.ui.tones[tone][0] : U.cell; ctx.fill();
           C.text(ctx, m.addr(j), rx + 10, y + 0.5, { size: 10.5, weight: 600, color: U.text, base: 'middle' });
           C.text(ctx, res > 0.5 ? m.val[j] : ITEMS[j], rx + 10 + tw(ctx, 'user["a"]', 10.5, 600) + 10, y + 0.5, { size: 10, base: 'middle' });
-          C.chip(ctx, txt, rx + rw - 8, y, tone, res);
+          if (tone !== 'ok') C.chip(ctx, txt, rx + rw - 8, y, tone, res);
         });
         if (link > 0) m.link.forEach(([, from, to]) => C.arrow(ctx, [[lw + 3, rowY(from)], [rx - 3, rowY(to)]], link, U.blue, { width: 1.6 }));
         const by = top + 32 + 3 * RH + 22;

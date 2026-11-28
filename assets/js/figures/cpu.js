@@ -397,7 +397,7 @@
         C.pill(ctx, 0, 0, sc.pill, sc.tone);
         C.text(ctx, 'Node.js 프로세스 하나', w, 11, { size: 10, align: 'right', base: 'middle' });
         C.group(ctx, 0, 34, R, 100, '메인 스레드', 49);
-        if (sleeping) C.text(ctx, '대기, CPU 0', R - 10, 49, { size: 10, weight: 600, color: U.tones.ok[1], align: 'right' });
+        if (sleeping) C.text(ctx, '대기, CPU 0', R - 10, 49, { size: 10, weight: 600, color: U.muted, align: 'right' });
         ['v8', 'loop', 'bind'].forEach((k) => C.card(ctx, B[k], { lit: lit.has(k), dim: sleeping, fill: k === 'v8' ? JSFILL : '#fff', stroke: k === 'v8' ? JSLINE : U.grid }));
         const phase = sleeping || (si < 2 && cur >= 2) ? 'poll' : PHASES[Math.floor(time * 1.5) % 3], L = B.loop;
         ctx.font = hwa.ui.font(10, 600);

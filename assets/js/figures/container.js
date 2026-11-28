@@ -174,8 +174,8 @@
         // Jail: the subtree the process sees as /. In chroot step 1 it shrinks to .out and leaves bash outside.
         const R0 = { x: X(0.4) - 30, y: Y(2) - 22, w: X(0.84) - X(0.4) + 60, h: Y(3) - Y(2) + 44 }, R1 = { x: X(0.84) - 30, y: Y(3) - 18, w: 60, h: 36 };
         const g = !i && st >= 1 ? (st === 1 ? f : 1) : 0, R = { x: R0.x + (R1.x - R0.x) * g, y: R0.y + (R1.y - R0.y) * g, w: R0.w + (R1.w - R0.w) * g, h: R0.h + (R1.h - R0.h) * g };
-        C.box(ctx, R.x, R.y, R.w, R.h, { fill: i ? '#f0fdf4' : '#eff6ff', stroke: i ? GREEN[2] : BLUE[2], r: 10 });
-        if (g < 0.5) C.text(ctx, i ? '새 /' : '프로세스의 /', R.x - 6, Y(2), { size: 10, weight: 700, color: i ? GREEN[1] : BLUE[1], align: 'right', base: 'middle' });
+        C.box(ctx, R.x, R.y, R.w, R.h, { fill: '#eff6ff', stroke: BLUE[2], r: 10 });
+        if (g < 0.5) C.text(ctx, i ? '새 /' : '프로세스의 /', R.x - 6, Y(2), { size: 10, weight: 700, color: BLUE[1], align: 'right', base: 'middle' });
         else C.text(ctx, '새 /', R.x + R.w / 2, R.y - 6, { size: 10, weight: 700, color: BLUE[1], align: 'center' });
         EDGE.forEach(([a, b]) => {
           const p = at(a), q = at(b);

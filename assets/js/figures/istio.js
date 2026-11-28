@@ -274,7 +274,8 @@
         C.arrow(ctx, [[gw + 2, y0 + 62], [px - 2, p1.y + 24]], 1, '#cbd5e1', { width: 1.2 });
         C.arrow(ctx, [[gw + 2, y0 + 62], [px - 2, p2.y + 24]], 1, cut ? '#e5e7eb' : '#cbd5e1', { width: 1.2, dash: cut ? [3, 3] : undefined });
         C.card(ctx, { ...p1, t: '결제 파드 1', s: `처리 중 ${n1}` });
-        C.card(ctx, { ...p2, t: '결제 파드 2', s: cut ? (n2 ? `제외, 남은 ${n2}` : '제외 30초') : on ? `503 ${failed}번, 대기 ${n2}` : '정상' }, { stroke: on ? BAD[2] : U.grid, dash: cut ? [4, 3] : undefined, dim: cut });
+        if (on) { ctx.beginPath(); ctx.roundRect(p2.x, p2.y, p2.w, p2.h, 8); ctx.fillStyle = BAD[0]; ctx.fill(); ctx.fillStyle = C.hatch(ctx, '#fecaca'); ctx.fill(); }
+        C.card(ctx, { ...p2, t: '결제 파드 2', s: cut ? (n2 ? `제외, 남은 ${n2}` : '제외 30초') : on ? `503 ${failed}번, 대기 ${n2}` : `처리 중 ${n2}` }, on ? { fill: 'transparent', stroke: BAD[1], dash: [3, 3], dim: cut } : {});
         const es = '503 3번 연속, 제외', ex = Math.min(px + pw / 2, w - tw(ctx, es, 13, 700) / 2 - 16);
         if (cut && t < eject + 1.2) C.stamp(ctx, ex, p2.y - 16, es, 'info', (t - eject) / 0.3);
         if (!on) hint(ctx, '파드 2 고장 내기 버튼을 눌러 보자', w / 2, y0 + gh + 18);

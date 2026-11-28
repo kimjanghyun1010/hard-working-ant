@@ -86,7 +86,7 @@
           [0, 1].forEach((m) => C.card(ctx, P(j, m), { lit: k >= 1 && j === i && m === 1 - i }));
         });
         if (k > 0 && k < 1) dot(ctx, along(pts, k));
-        tag(ctx, `${IPS[0][0]} → ${i ? IPS[1][0] : IPS[0][1]}`, w / 2, 254, k >= 1 ? GREEN : BLUE);
+        tag(ctx, `${IPS[0][0]} → ${i ? IPS[1][0] : IPS[0][1]}`, w / 2, 254, BLUE);
         C.stamp(ctx, w / 2, 116, 'NAT 없이 도착', 'ok', i === 1 ? (run - LENS[1]) / 0.4 : 0);
         say(notes[i]);
       },

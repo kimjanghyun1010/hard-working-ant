@@ -200,8 +200,8 @@
             C.card(ctx, { x: px + 8, y: cy(j), w: pw - 16, h: 32, t: c[0], s: pw >= 150 ? c[1] : undefined }, on ? { lit: true, ...tint(BLUE) } : {});
           });
           const ws = step >= 0 && u >= 1.0;
-          C.box(ctx, px + 8, 208, pw - 16, 28, { fill: ws ? GREEN[0] : U.plot, stroke: ws ? GREEN[2] : U.grid, r: 6 });
-          C.text(ctx, pw >= 150 ? 'workspace (emptyDir)' : 'workspace', px + pw / 2, 222.5, { size: 10, weight: 600, color: ws ? GREEN[1] : U.muted, align: 'center', base: 'middle' });
+          C.box(ctx, px + 8, 208, pw - 16, 28, { fill: ws ? BLUE[0] : U.plot, stroke: ws ? BLUE[2] : U.grid, r: 6 });
+          C.text(ctx, pw >= 150 ? 'workspace (emptyDir)' : 'workspace', px + pw / 2, 222.5, { size: 10, weight: 600, color: ws ? BLUE[1] : U.muted, align: 'center', base: 'middle' });
         });
         if (i === 0) {
           C.arrow(ctx, [[cw - 4, 200], [px, 200]], ease(t, 0.2, 0.8), '#94a3b8', { width: 1.2 });

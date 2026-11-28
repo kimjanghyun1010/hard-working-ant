@@ -242,10 +242,10 @@
       height: 236, still: S.at(2) + SEC + 1, scenes: S, notes,
       frame: (ctx, w, h, time, say) => {
         const { i, t } = hwa.loop(time, SEC, HOLD, 3);
-        C.pill(ctx, 0, 0, ['정답', '모두 생존이라고 예측', '놓친 사망'][i], ['info', 'ok', 'bad'][i]);
+        C.pill(ctx, 0, 0, ['정답', '모두 생존이라고 예측', '놓친 사망'][i], ['info', 'warn', 'bad'][i]);
         C.legend(ctx, w - 150, 11, [['사망(정답)', U.red]]);
         const end = dots(ctx, w, 46, { pred: i ? all : null, show: i === 1 ? ease(t, 0, 2.5) : 1, miss: i === 2 });
-        if (i === 1) C.stamp(ctx, w / 2, end + 22, `정확도 ${acc}%`, 'ok', (t - 2.6) / 0.4);
+        if (i === 1) C.stamp(ctx, w / 2, end + 22, `정확도 ${acc}%`, 'warn', (t - 2.6) / 0.4);
         if (i === 2) C.stamp(ctx, w / 2, end + 22, `사망 ${nd}명 중 0명 찾음`, 'bad', (t - 0.8) / 0.4);
         say(notes[i]);
       },

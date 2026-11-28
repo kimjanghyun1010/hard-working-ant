@@ -97,7 +97,7 @@
         link(ctx, [git.r, argo.l]);
         C.text(ctx, '읽어 감', (git.r[0] + argo.l[0]) / 2, git.cy - 8, { size: 10, align: 'center' });
         link(ctx, [argo.b, dep.t]);
-        const st = t >= 5.6 || t < 3.9 ? ['Synced', 'ok'] : ['OutOfSync', 'warn'];
+        const st = t < 3.9 ? ['Synced'] : t < 5.6 ? ['OutOfSync', 'warn'] : ['Synced', 'ok'];
         node(ctx, argo, { s: st[0], tone: st[1], lit: t >= 3.9 && t < 5.6 });
       } else {
         link(ctx, [git.r, ci.l]);
@@ -147,7 +147,7 @@
       node(ctx, reg, { s: sha ? (pushed ? '3f2a91c' : 'a41d07e') : `latest = ${pushed ? 'v2' : 'v1'}`, tone: pushed ? 'blue' : undefined });
       node(ctx, git, { s: sha ? (committed ? 'app:3f2a91c' : 'app:a41d07e') : 'app:latest', tone: committed ? 'blue' : undefined, lit: committed && t < 3.4 });
       if (!sha && t >= 1.6) C.text(ctx, '변경 없음', git.cx, git.y + git.h + 14, { size: 10, weight: 600, color: COL.warn[1], align: 'center' });
-      const st = !sha ? ['Synced', 'ok'] : t < 3.3 ? ['Synced', 'ok'] : t < 5.6 ? ['동기화 중', 'warn'] : ['Synced', 'ok'];
+      const st = !sha || t < 3.3 ? ['Synced'] : t < 5.6 ? ['동기화 중', 'warn'] : ['Synced', 'ok'];
       node(ctx, argo, { s: st[0], tone: st[1] });
       const ver = [0, 1, 2].map((k) => (sha ? (t >= 3.8 + k * 0.6 ? 'v2' : 'v1') : k === 2 && t >= 4.8 ? 'v2' : 'v1'));
       ver.forEach((v, k) => {
@@ -303,7 +303,7 @@
           if (k === 3 && !add) return;
           if (t >= born) link(ctx, elbow(root.r, b.l));
           const synced = t >= born + 0.6;
-          node(ctx, b, { s: synced ? 'Synced' : '동기화 중', tone: synced ? 'ok' : 'warn', a: ease(t, born, born + 0.3) });
+          node(ctx, b, { s: synced ? 'Synced' : '동기화 중', tone: !synced ? 'warn' : born > 0 ? 'ok' : undefined, a: ease(t, born, born + 0.3) });
           if (born > 0) ride(ctx, elbow(root.r, b.l), t, born - 0.6, born, 'App', COL.blue);
         });
         ride(ctx, [from, root.l], t, add ? 1.4 : 0.3, add ? 2.2 : 1.2, add ? 'todo-api' : '3개', COL.blue);

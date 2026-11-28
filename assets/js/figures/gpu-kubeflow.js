@@ -140,10 +140,12 @@
           C.box(ctx, nx + 8, y, nw - 16, 36, { fill: '#fff', on: cur === j, r: 6 });
           C.text(ctx, name, nx + 18, y + 12, { size: 11, weight: 600, color: U.text, base: 'middle' });
           C.text(ctx, note, nx + 18, y + 26, { size: 10, base: 'middle' });
-          ctx.beginPath();
-          ctx.arc(nx + nw - 20, y + 18, 4, 0, Math.PI * 2);
-          ctx.fillStyle = ready ? '#22c55e' : '#f59e0b';
-          ctx.fill();
+          if (!ready) {
+            ctx.beginPath();
+            ctx.arc(nx + nw - 20, y + 18, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#f59e0b';
+            ctx.fill();
+          }
           ctx.globalAlpha = 1;
           if (cur === j) C.arrow(ctx, [[opW + 1, 176], [nx - 2, 176], [nx - 2, y + 18], [nx + 7, y + 18]], hwa.smooth((time % (s.run + 2.6) - j * STEP) / (STEP * 0.6)), U.accent);
         });
@@ -313,12 +315,12 @@
           C.box(ctx, nx, n.y, nw, 52, { fill: fail ? RED[0] : '#fff', stroke: chosen ? (fail ? RED[2] : U.accent) : U.grid, r: 8 });
           C.text(ctx, n.name, nx + 10, n.y + 18, { size: 11, weight: 600, color: U.text, base: 'middle' });
           C.text(ctx, n.gpu, nx + 10, n.y + 36, { size: 10, base: 'middle' });
-          const seen = dra ? n.mem : 'gpu: 1', col = dra ? (j ? GREEN : RED) : BLUE;
+          const seen = dra ? n.mem : 'gpu: 1', col = dra && !j ? RED : BLUE;
           const cw = tw(ctx, seen, 10, 600) + 14;
           tag(ctx, seen, nx + nw - 8 - cw / 2, n.y + 26, col, ease(t, 1.6 + j * 0.4, 2.1 + j * 0.4));
           C.arrow(ctx, [[sx + sw + 1, 138], [nx - 8, 138], [nx - 8, n.y + 26], [nx - 1, n.y + 26]], j === pick ? ease(t, 2.8, 3.8) : 0, U.accent);
         });
-        if (t >= 2.8) tag(ctx, '학습 파드', ...mix([sx + sw / 2, 100], [nx + nw / 2, N[pick].y - 10], ease(t, 2.8, 4.0)), dra ? GREEN : ORANGE, 1);
+        if (t >= 2.8) tag(ctx, '학습 파드', ...mix([sx + sw / 2, 100], [nx + nw / 2, N[pick].y - 10], ease(t, 2.8, 4.0)), dra ? BLUE : ORANGE, 1);
         C.stamp(ctx, nx + nw / 2, N[pick].y + 76, dra ? 'A100에 배치' : '메모리 부족', dra ? 'ok' : 'bad', (t - 4.4) / 0.4);
         if (wide) C.text(ctx, dra ? '조건에 맞는 장치만 후보' : '개수만 보고 아무 노드나', sx + sw / 2, 182, { size: 10, align: 'center' });
         say(notes[i]);

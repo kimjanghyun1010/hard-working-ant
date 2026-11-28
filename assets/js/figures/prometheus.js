@@ -6,7 +6,7 @@
   const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
   const BLUE = ['#dbeafe', '#1d4ed8', '#93c5fd'], ORANGE = ['#fef3c7', '#b45309', '#fcd34d'], RED = ['#fee2e2', '#dc2626', '#fca5a5'];
   const GREEN = ['#dcfce7', '#15803d', '#86efac'], PURPLE = ['#ede9fe', '#6d28d9', '#c4b5fd'], MUTE = [U.cell, U.muted, '#e2e8f0'];
-  const LINE = '#e2e8f0';
+  const LINE = '#e2e8f0', PLAIN = ['#fff', U.text, U.grid];
   const each = (id, fn) => document.querySelectorAll(`[data-figure="${id}"]`).forEach(fn);
   // Scenes of unequal length, each followed by the same hold.
   const seq = (lens, hold) => {
@@ -67,7 +67,7 @@
           if (t >= got) dot(ctx, slot(n - 1), y, 5, off ? U.red : U.blue);
           else { ctx.beginPath(); ctx.arc(slot(n - 1), y, 4, 0, Math.PI * 2); ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.stroke(); }
           const last = t >= got ? (off ? 0 : 1) : 1;
-          C.text(ctx, `up ${last}`, rx + 12, y, { size: 10, weight: 600, color: last ? U.tones.ok[1] : U.red, base: 'middle' });
+          C.text(ctx, `up ${last}`, rx + 12, y, { size: 10, weight: 600, color: last ? U.text : U.red, base: 'middle' });
           ride(ctx, 'GET', [[gx + 4, y - 9], [cw + 16, y - 9]], ease(t, sent, sent + 1.1), MUTE, 9);
           if (!off) ride(ctx, '200', [[cw + 16, y + 9], [slot(n - 1), y + 9]], ease(t, sent + 1.7, got), GREEN, 9);
           else if (t > sent + 1.2 && t < got) C.text(ctx, '응답 없음', cw + 6, y + 14, { size: 9, weight: 600, color: U.red });
@@ -226,8 +226,8 @@
         const ry = 240, lx = w * 0.28, lr = w * 0.68;
         C.text(ctx, '안에서', lx, ry - 16, { size: 9, align: 'center' });
         C.text(ctx, '밖에서', lr, ry - 16, { size: 9, align: 'center' });
-        tag(ctx, 'up 1', lx, ry, upNew ? GREEN : MUTE, 1, 10);
-        tag(ctx, `probe_success ${pv}`, lr, ry, prNew ? (pv ? GREEN : RED) : MUTE, 1, 10);
+        tag(ctx, 'up 1', lx, ry, upNew ? PLAIN : MUTE, 1, 10);
+        tag(ctx, `probe_success ${pv}`, lr, ry, prNew ? (pv ? PLAIN : RED) : MUTE, 1, 10);
         if (bad) C.stamp(ctx, bx + bw / 2, 132, narrow ? '밖은 0' : '안은 1, 밖은 0', 'bad', (t - 4.2) / 0.4);
         say(notes[i]);
       },

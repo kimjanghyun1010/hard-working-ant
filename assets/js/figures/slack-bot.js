@@ -272,9 +272,9 @@
           if (gate && t >= d + 1.3) C.text(ctx, '건너뜀', lx + 6, lis.y + lis.h + 18, { size: 10, weight: 700, color: U.muted });
         }
         for (let k = 0; k < replies; k++) {
-          const y = 66 + k * 34, c = k ? COL.bad : COL.ok;
+          const y = 66 + k * 34, c = k ? COL.bad : ['#fff', U.text, U.grid];
           C.box(ctx, cx + 8, y, cw - 16, 26, { fill: c[0], stroke: c[2], r: 6 });
-          C.text(ctx, k ? '같은 답' : 'api 정상', cx + 16, y + 13.5, { size: 10, weight: 600, color: c[1], base: 'middle' });
+          C.text(ctx, k ? '같은 답' : '답', cx + 16, y + 13.5, { size: 10, weight: 600, color: c[1], base: 'middle' });
         }
         if (run < 0) C.text(ctx, '재전송 일으키기 버튼을 눌러 보자', w / 2, 236, { size: 12, align: 'center', base: 'middle' });
         C.stamp(ctx, w / 2, 236, M.stamp[0], M.stamp[1], (run - SEC) / 0.4);
@@ -309,8 +309,8 @@
         [['시각 차이', sc.ts, 1.5], ['서명 비교', sc.sig, 2.5]].forEach(([label, v, at], j) => {
           C.box(ctx, bx + 8, ry[j] - 17, bw - 16, 34, { fill: '#fff' });
           C.text(ctx, label, bx + 18, ry[j] + 0.5, { size: 11, weight: 600, color: U.text, base: 'middle' });
-          if (v) C.chip(ctx, v[0], bx + bw - 16, ry[j], v[1], ease(t, at, at + 0.4));
-          else if (t >= at) C.text(ctx, '검사 안 함', bx + bw - 18, ry[j] + 0.5, { size: 10, align: 'right', base: 'middle' });
+          if (v && v[1] === 'bad') C.chip(ctx, v[0], bx + bw - 16, ry[j], v[1], ease(t, at, at + 0.4));
+          else if (t >= at) C.text(ctx, v ? v[0] : '검사 안 함', bx + bw - 18, ry[j] + 0.5, { size: 10, weight: v ? 600 : 400, color: v ? U.text : U.muted, align: 'right', base: 'middle' });
         });
         C.stamp(ctx, bx + bw / 2, 190, sc.end[0], sc.end[1], (t - 3.6) / 0.4);
         say(`${sc.pill}. ${sc.note}`);
@@ -340,8 +340,8 @@
       C.text(ctx, '봇 토큰 권한', mid, a.y + 18, { size: 10, weight: 600, color: U.text, align: 'center', base: 'middle' });
       SCOPES.forEach(([s, has], j) => {
         const y = a.y + 44 + j * 24, hot = i === 2 ? !has : j === 0;
-        if (hot) C.box(ctx, a.x + 6, y - 10, a.w - 12, 20, { fill: has ? COL.ok[0] : COL.bad[0], stroke: has ? COL.ok[2] : COL.bad[2], r: 5 });
-        C.text(ctx, s, mid, y + 0.5, { size, weight: 600, color: has ? U.tones.ok[1] : hot ? U.red : U.muted, align: 'center', base: 'middle' });
+        if (hot) C.box(ctx, a.x + 6, y - 10, a.w - 12, 20, { fill: has ? U.accentSoft : COL.bad[0], stroke: has ? U.accentLine : COL.bad[2], r: 5 });
+        C.text(ctx, s, mid, y + 0.5, { size, weight: 600, color: has ? U.text : hot ? U.red : U.muted, align: 'center', base: 'middle' });
         if (!has) { const sw = tw(ctx, s, size, 600); C.line(ctx, [[mid - sw / 2, y], [mid + sw / 2, y]], hot ? U.red : U.muted, 1); }
       });
       if (i === 1 && (cur >= 1 || done)) {
@@ -352,7 +352,7 @@
     },
     scenes: [
       { pill: '#ops에 쓰기', tone: 'ok', stamp: ['ok: true', 'ok'], note: 'chat:write가 있고 봇이 들어가 있는 채널이라 글이 올라간다.', steps: [
-        ['bot', 'api', 'chat.postMessage', 'blue', '봇 토큰으로 #ops에 쓴다', -7], ['api', 'ops', '배포 실패', 'ok', '권한과 채널 둘 다 통과한다'],
+        ['bot', 'api', 'chat.postMessage', 'blue', '봇 토큰으로 #ops에 쓴다', -7], ['api', 'ops', '배포 실패', 'blue', '권한과 채널 둘 다 통과한다'],
       ] },
       { pill: '#secret에 쓰기', tone: 'bad', stamp: ['not_in_channel', 'bad'], note: '권한이 있어도 봇이 없는 채널에는 쓸 수 없다.', steps: [
         ['bot', 'api', 'chat.postMessage', 'blue', '#secret에 쓰려고 한다', -7], ['api', 'bot', 'not_in_channel', 'bad', '봇이 없는 채널이라 거절된다', 7],

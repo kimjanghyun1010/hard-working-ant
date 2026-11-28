@@ -18,7 +18,8 @@
       ctx.roundRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 8);
       ctx.fillStyle = down ? '#fef2f2' : idle ? U.plot : '#fff';
       ctx.fill();
-      ctx.setLineDash(idle ? [4, 3] : []);
+      if (down) { ctx.fillStyle = C.hatch(ctx, '#fecaca'); ctx.fill(); }
+      ctx.setLineDash(idle ? [4, 3] : down ? [3, 3] : []);
       ctx.strokeStyle = down ? RED[2] : st === 'on' ? U.accent : st === 'warn' ? AMBER[2] : U.grid;
       ctx.lineWidth = st === 'on' ? 2 : 1;
       ctx.stroke();
@@ -27,13 +28,8 @@
     }
     if (part === 'box') return;
     const cy = b.y + b.h / 2;
-    C.text(ctx, b.t, b.x + b.w / 2, b.s ? cy - 7 : cy, { size: b.size || 11, weight: 600, color: down || idle ? U.muted : U.text, align: 'center', base: 'middle' });
+    C.text(ctx, b.t, b.x + b.w / 2, b.s ? cy - 7 : cy, { size: b.size || 11, weight: 600, color: down ? U.red : idle ? U.muted : U.text, align: 'center', base: 'middle' });
     if (b.s) C.text(ctx, b.s, b.x + b.w / 2, cy + 8, { size: 10, weight: b.sc ? 600 : 400, color: b.sc || U.muted, align: 'center', base: 'middle' });
-    if (down) {
-      const x = b.x + b.w - 10, y = b.y + 10;
-      C.line(ctx, [[x - 3.5, y - 3.5], [x + 3.5, y + 3.5]], U.red, 1.8);
-      C.line(ctx, [[x + 3.5, y - 3.5], [x - 3.5, y + 3.5]], U.red, 1.8);
-    }
   };
   // Chip centred at (x, y). col = [bg, fg, line].
   const tag = (ctx, s, x, y, col, a = 1, size = 10) => {
@@ -57,6 +53,8 @@
   };
   const FADE = 0.45;
   // Requests born every gap seconds take dur to run route(tb, j).pts. fail turns one red where it ends; it then fades.
+  // j goes negative for dots already in flight when t starts at 0.
+  const mod = (a, n) => ((a % n) + n) % n;
   const flow = (ctx, t, gap, dur, route) => {
     for (let j = Math.floor((t - dur - FADE) / gap); j * gap <= t; j++) {
       const tb = j * gap, r = route(tb, j), k = (t - tb) / dur;
@@ -134,7 +132,7 @@
         const user = { x: 0, y: 104, w: 50, h: 44, t: '사용자' }, lb = { x: Math.max(68, w * 0.3), y: 100, w: 58, h: 52, t: 'LB' };
         const sv = [0, 1].map((k) => ({ x: w - sw, y: 46 + k * 104, w: sw, h: 58 }));
         const swAt = FAIL + sc.detect, cy = (b) => b.y + b.h / 2;
-        const target = (td, j) => (td >= swAt ? 1 : aa ? j % 2 : 0);
+        const target = (td, j) => (td >= swAt ? 1 : aa ? mod(j, 2) : 0);
         const route = (tb, j) => {
           const td = tb + DUR * AT, k = target(td, j), b = sv[k];
           return { pts: [[user.x + user.w / 2, cy(user)], [lb.x + lb.w / 2, cy(lb)], k === 0 && tb + DUR >= FAIL ? [b.x - 5, cy(b) - 8] : [b.x + 30, cy(b) - 8]], fail: k === 0 && tb + DUR >= FAIL };
@@ -211,7 +209,7 @@
           ctx.globalAlpha = 0.92;
           C.box(ctx, x, y - 15, rw, 30, { fill: '#fff', r: 6 });
           ctx.globalAlpha = 1;
-          dot(ctx, x + 11, y, bad ? U.red : '#22c55e', 3.5);
+          if (bad) dot(ctx, x + 11, y, U.red, 3.5);
           C.text(ctx, narrow ? (k ? 'FD' : 'CF') : name, x + 21, y + 0.5, { size: 10, weight: 600, color: U.text, base: 'middle' });
           C.text(ctx, `가중치 ${wt}`, x + rw - 8, y + 0.5, { size: 10, align: 'right', base: 'middle' });
         });
@@ -315,7 +313,7 @@
         const beat = t % 1;
         if (!dead && beat < 0.5) dot(ctx, lx, lerp([0, hp[0].y + hp[0].h], [0, hp[1].y], beat / 0.5)[1], U.purple, 3);
         flow(ctx, t, GAP, DUR, (tb, j) => {
-          const td = tb + DUR * AT, o = owner(td), a = hp[o], m = ms[j % 3];
+          const td = tb + DUR * AT, o = owner(td), a = hp[o], m = ms[mod(j, 3)];
           const fail = i === 1 && o === 0 && tb + DUR * AT >= FAIL;
           const pts = [[cl.x + cl.w / 2, cy(cl)], fail ? [a.x - 5, cy(a)] : [a.x + a.w / 2, cy(a)]];
           if (!fail) pts.push([m.x + m.w / 2, cy(m)]);
