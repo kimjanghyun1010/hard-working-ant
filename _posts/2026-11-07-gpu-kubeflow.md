@@ -15,7 +15,7 @@ scripts: [figures/gpu-kubeflow.js]
 
 명령을 만드는 쪽은 사용자 공간의 드라이버 라이브러리(`libcuda.so`, `nvidia-smi`가 쓰는 `libnvidia-ml.so`)이고, 커널 모듈과 버전이 같아야 한다. 드라이버를 올리고 재부팅하지 않으면 메모리에 남은 옛 모듈과 새 라이브러리가 어긋나 `nvidia-smi`가 `Failed to initialize NVML: Driver/library version mismatch`를 낸다.
 
-CUDA 컨테이너 이미지에는 CUDA 런타임(`libcudart`)까지만 있고 `libcuda.so`는 없다. 드라이버는 호스트 커널에 붙어 있어 이미지에 넣으면 노드마다 버전이 어긋나기 때문이다. 그래서 컨테이너는 시작할 때 호스트의 장치 파일과 드라이버 라이브러리를 받아야 하는데, 기본 런타임 runc는 이미지에 있는 것만 넣는다.
+CUDA 컨테이너 이미지에는 CUDA 런타임(`libcudart`)까지만 있고 `libcuda.so`는 없다. 드라이버는 호스트 커널에 붙어 있어 이미지에 넣으면 노드마다 버전이 어긋나기 때문이다. 그래서 컨테이너는 시작할 때 호스트의 장치 파일과 드라이버 라이브러리를 받아야 하는데, 컨테이너 프로세스를 실제로 띄우는 기본 런타임 runc는 이미지에 있는 것만 넣는다.
 
 `nvidia-container-runtime`(NVIDIA Container Toolkit)은 runc를 감싼 얇은 래퍼로, 컨테이너 명세(OCI spec, `config.json`)에 GPU 장치와 마운트를 더한 뒤 runc를 부른다. 아래 데모에서 런타임을 runc와 nvidia 런타임으로 바꿔 컨테이너를 시작하면 같은 이미지 안에 무엇이 더해지는지 비교할 수 있다.
 
@@ -43,7 +43,7 @@ nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml
 nvidia-ctk cdi list            # nvidia.com/gpu=0, nvidia.com/gpu=all ...
 ```
 
-명세 파일은 `nvidia-cdi-refresh` 서비스가 드라이버 업그레이드와 재부팅 때 다시 만들지만, MIG 분할을 바꾼 뒤에는 직접 다시 만든다.
+명세 파일은 `nvidia-cdi-refresh` 서비스가 드라이버 업그레이드와 재부팅 때 다시 만들지만, MIG(GPU를 하드웨어에서 쪼개는 기능) 분할을 바꾼 뒤에는 직접 다시 만든다.
 
 런타임은 `NVIDIA_VISIBLE_DEVICES`에 적힌 GPU를 넣을 뿐, 어느 파드에 어느 GPU를 줄지는 모른다. 스케줄러도 노드에 GPU가 몇 개 있는지 모른다. 이 둘을 잇는 것이 device plugin이다.
 
@@ -54,7 +54,7 @@ nvidia-ctk cdi list            # nvidia.com/gpu=0, nvidia.com/gpu=all ...
 device plugin은 노드마다 파드를 하나씩 띄우는 DaemonSet으로 돌고, kubelet과 gRPC(소켓 너머의 함수를 부르는 원격 호출 방식)로 주고받는다.
 
 1. 등록(`Register`): plugin은 `/var/lib/kubelet/device-plugins/` 아래 자기 소켓에서 gRPC 서버를 먼저 띄운 뒤, 같은 폴더의 `kubelet.sock`에 소켓 이름, API 버전, 자원 이름을 보낸다.
-2. 보고(`ListAndWatch`): GPU 목록과 GPU마다의 상태를 스트림으로 보내고, 바뀔 때마다 새 목록을 보낸다. kubelet은 개수를 노드의 `capacity`와 `allocatable`에 올린다.
+2. 보고(`ListAndWatch`): GPU 목록과 GPU마다의 상태를 스트림으로 보내고, 바뀔 때마다 새 목록을 보낸다. kubelet은 개수를 노드의 `capacity`(전체)와 `allocatable`(할당 가능)에 올린다.
 3. 할당(`Allocate`): 파드가 배치되어 컨테이너를 만들 때 kubelet이 고른 GPU ID를 넘긴다. plugin은 컨테이너에 넣을 환경 변수, 마운트, 장치 파일, CDI 장치 이름을 돌려준다.
 
 아래 그림처럼 스케줄러가 아는 것은 노드마다 남은 GPU 개수뿐이고, 몇 번 GPU를 줄지는 노드에 배치된 뒤 정해진다.
@@ -83,9 +83,9 @@ NVIDIA plugin 문서는 GPU를 요청하지 않은 컨테이너에 노드의 GPU
 
 ## GPU 나눠 쓰기
 
-CPU는 `500m`처럼 나눠 줄 수 있다. CFS가 100ms 주기마다 시간을 잘라 컨테이너들에 나눠 주기 때문이다([CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %}) 참고). device plugin의 GPU는 정수라서 GPU 하나가 컨테이너 하나에 통째로 간다. 노트북 파드가 GPU를 거의 쓰지 않아도 다른 파드는 그 GPU를 받지 못하고, 이런 GPU는 GPU 지표를 Prometheus 형식으로 내보내는 DCGM exporter의 `DCGM_FI_DEV_GPU_UTIL`(사용률)로 찾는다.
+CPU는 `500m`처럼 나눠 줄 수 있다. 리눅스 CPU 스케줄러 CFS가 100ms 주기마다 시간을 잘라 컨테이너들에 나눠 주기 때문이다([CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %}) 참고). device plugin의 GPU는 정수라서 GPU 하나가 컨테이너 하나에 통째로 간다. 노트북 파드가 GPU를 거의 쓰지 않아도 다른 파드는 그 GPU를 받지 못하고, 이런 GPU는 GPU 지표를 Prometheus 형식으로 내보내는 DCGM exporter의 `DCGM_FI_DEV_GPU_UTIL`(사용률)로 찾는다.
 
-NVIDIA가 내놓은 나누는 방법은 세 가지이고, 무엇까지 떼어 주느냐가 다르다.
+NVIDIA가 내놓은 나누는 방법은 time-slicing, MPS, MIG 세 가지다.
 
 ### time-slicing
 
@@ -100,7 +100,7 @@ sharing:
         replicas: 4
 ```
 
-GPU 1개 노드가 `nvidia.com/gpu: 4`로 보이고, 제품 라벨 끝에 `-SHARED`가 붙어(`A100-SXM4-40GB-SHARED`) nodeSelector로 이런 노드를 고를 수 있다.
+GPU 1개 노드가 `nvidia.com/gpu: 4`로 보이고, 제품 라벨 끝에 `-SHARED`가 붙는다(`A100-SXM4-40GB-SHARED`). 파드의 nodeSelector(배치할 노드를 라벨로 고르는 설정)에 이 라벨을 적으면 공유 GPU 노드로 간다.
 
 GPU는 받은 프로세스들의 작업을 번갈아(interleave) 돌리고, 모든 프로세스에 같은 시간을 준다. 아래 데모에서 모드를 바꿔 실험 넷을 제출하면 통째로 할당과 time-slicing에서 실험이 끝나는 시각을 비교할 수 있다.
 
@@ -180,7 +180,7 @@ spec:
           deviceClassName: gpu.nvidia.com
           selectors:
           - cel:
-              expression: device.capacity['gpu.nvidia.com'].memory.isGreaterThan(quantity("40Gi"))
+              expression: device.capacity['gpu.nvidia.com'].memory.compareTo(quantity("40Gi")) >= 0
 ```
 
 파드는 `resources.claims`로 이 템플릿을 가리킨다. 같은 ResourceClaim을 여러 컨테이너나 파드가 가리키면 장치 하나를 같이 쓴다.
@@ -213,7 +213,7 @@ GPU 노드 하나에 드라이버, toolkit, CDI 명세, device plugin이 서야 
 
 ## Kubeflow Pipelines
 
-Kubeflow는 GPU를 직접 다루지 않는다. 노트북, 파이프라인, 학습 작업은 모두 `nvidia.com/gpu`를 요청하는 평범한 파드가 되어 앞 절의 층을 그대로 지난다.
+Kubeflow는 쿠버네티스 위의 ML 플랫폼이고, GPU를 직접 다루지 않는다. 노트북, 파이프라인, 학습 작업은 모두 `nvidia.com/gpu`를 요청하는 평범한 파드가 되어 앞 절의 층을 그대로 지난다.
 
 KFP v2 SDK는 파이썬으로 적은 단계(component)를 IR YAML(PipelineSpec)로 컴파일하고, 백엔드가 이를 Argo Workflows(단계마다 파드를 띄우는 쿠버네티스 워크플로 엔진)의 Workflow로 바꿔 실행한다. 단계마다 컨테이너가 따로 뜨고, 단계끼리는 메모리를 나누지 못해 작은 값은 파라미터로, 모델 파일 같은 큰 데이터는 아티팩트로 넘긴다.
 

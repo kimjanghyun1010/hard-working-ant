@@ -9,7 +9,7 @@ scripts: [figures/high-availability.js]
 
 ## 단일 장애점
 
-요청 하나는 DNS, CDN, 로드밸런서, 앱, DB를 차례로 지나야 응답이 된다. 이 가운데 하나만 멈춰도 전체가 멈추는 지점을 단일 장애점(SPOF, single point of failure)이라고 한다. 계층마다 같은 역할을 둘 이상 두는 이중화(redundancy)로 단일 장애점을 없애는데, 한 대가 멈춘 순간에도 요청이 계속 성공하려면 두 대를 두는 것만으로는 모자라다.
+요청 하나는 DNS, CDN(사용자 가까이에서 응답을 대신 주는 캐시 서버망), 로드밸런서, 앱, DB를 차례로 지나야 응답이 된다. 이 가운데 하나만 멈춰도 전체가 멈추는 지점을 단일 장애점(SPOF, single point of failure)이라고 한다. 계층마다 같은 역할을 둘 이상 두는 이중화(redundancy)로 단일 장애점을 없애는데, 한 대가 멈춘 순간에도 요청이 계속 성공하려면 두 대를 두는 것만으로는 모자라다.
 
 아래 그림처럼 계층마다 한 대면 DB 하나가 멈출 때 앞의 네 계층이 멀쩡해도 응답은 0%다. 두 대를 두면 남은 DB로 계속 응답한다.
 
@@ -35,13 +35,13 @@ scripts: [figures/high-availability.js]
 
 Active-Active는 로드밸런서가 멈춘 쪽을 빼는 짧은 순간만 실패하지만, 남은 쪽이 평소의 두 배를 받는다. N대 가운데 한 대가 빠져도 버티려면 평소 사용률을 (N-1)/N 아래로 둔다. 두 대면 50%, 세 대면 약 67%다.
 
-Active-Standby는 대기 장비가 놀고, 감지하고 넘기는 동안 들어온 요청이 실패한다. 그래도 쓰기 주인이 하나여야 하는 DB, 주소 하나를 한 노드만 가져야 하는 VIP는 이 방식으로 둔다.
+Active-Standby는 대기 장비가 놀고, 감지하고 넘기는 동안 들어온 요청이 실패한다. 그래도 쓰기 주인이 하나여야 하는 DB, 한 노드만 가져야 하는 가상 IP(VIP)는 이 방식으로 둔다.
 
 ## 장애 감지
 
 멈춘 서버는 멈췄다고 알리지 못한다. 그래서 감지는 살아 있다는 신호가 끊긴 것으로 판단한다. 정해진 간격으로 신호(하트비트, heartbeat)를 주고받거나 상대에게 묻고, 정해진 횟수만큼 답이 없으면 멈췄다고 본다. 감지 시간은 대략 간격 곱하기 횟수다.
 
-keepalived가 쓰는 VRRP(Virtual Router Redundancy Protocol)가 이 방식이다. 두 노드가 가상 IP(VIP) 하나를 나눠 갖고, 우선순위가 높은 MASTER가 VIP를 쥔 채 `advert_int`(보통 1초)마다 멀티캐스트 주소 224.0.0.18로 광고를 보낸다. BACKUP은 광고가 아래 시간 동안 오지 않으면 MASTER가 멈췄다고 본다.
+keepalived가 쓰는 VRRP(Virtual Router Redundancy Protocol)가 이 방식이다. 두 노드가 VIP 하나를 나눠 갖고, 우선순위가 높은 MASTER가 VIP를 쥔 채 `advert_int`(보통 1초)마다 광고를 보낸다. 광고는 같은 네트워크의 여러 장비가 함께 받는 멀티캐스트 주소 224.0.0.18로 간다. BACKUP은 광고가 아래 시간 동안 오지 않으면 MASTER가 멈췄다고 본다.
 
 ```text
 Master_Down_Interval = 3 × advert_int + Skew_Time
@@ -49,7 +49,9 @@ Skew_Time            = (256 - priority) / 256 × advert_int
 BACKUP priority 100, advert_int 1초  →  3 + 0.61 = 약 3.6초
 ```
 
-Skew_Time은 BACKUP이 여럿일 때 우선순위가 높은 쪽이 먼저 나서게 하는 차이다. MASTER가 정상 종료할 때는 우선순위 0인 광고를 보낸다. 이 광고를 받은 BACKUP은 기다리는 시간을 Skew_Time으로 줄여, priority 100이면 약 0.61초 뒤에 넘겨받는다. 아래 그림은 쿠버네티스 클러스터를 만드는 도구인 kubeadm으로 세운 컨트롤 플레인 앞에 keepalived 두 대를 둔 구성이다.
+Skew_Time은 BACKUP이 여럿일 때 우선순위가 높은 쪽이 먼저 나서게 하는 차이다. MASTER가 정상 종료할 때는 우선순위 0인 광고를 보낸다. 이 광고를 받은 BACKUP은 기다리는 시간을 Skew_Time으로 줄여, priority 100이면 약 0.61초 뒤에 넘겨받는다.
+
+아래 그림은 쿠버네티스 클러스터를 만드는 도구인 kubeadm으로 세운 컨트롤 플레인(클러스터를 관리하는 서버들) 앞에 keepalived 두 대를 둔 구성이다.
 
 <figure class="fig" data-figure="high-availability-vip">
   <figcaption>keepalived 두 대와 kube-apiserver 세 대</figcaption>
@@ -66,22 +68,22 @@ vrrp_script check_apiserver {
 }
 ```
 
-다른 계층도 틀은 같고 값만 다르다.
+다른 계층도 간격과 횟수로 감지한다.
 
-- MongoDB 레플리카셋: 멤버끼리 2초마다 하트비트를 주고받는다. Primary와 10초(`electionTimeoutMillis` 기본값) 넘게 연락이 끊기면 Secondary가 선거를 연다.
-- etcd: 리더가 100ms마다 하트비트를 보내고, 1000ms 동안 받지 못한 멤버가 선거를 연다.
-- Route 53 헬스체크: 세계 여러 곳의 체커가 30초(빠른 체크는 10초)마다 묻고, 연속 3회(기본 실패 임계값) 실패하면 비정상으로 센다. 체커의 18%를 넘게 정상이라고 보면 정상으로 친다.
+- MongoDB 레플리카셋: 쓰기를 받는 Primary 한 대와 사본을 든 Secondary로 이뤄진다. 멤버끼리 2초마다 하트비트를 주고받고, Primary와 10초(`electionTimeoutMillis` 기본값) 넘게 연락이 끊기면 Secondary가 새 Primary를 뽑는 선거를 연다.
+- etcd(쿠버네티스의 상태를 저장하는 DB): 리더가 100ms마다 하트비트를 보내고, 1000ms 동안 받지 못한 멤버가 선거를 연다.
+- Route 53(AWS의 DNS) 헬스체크: 세계 여러 곳의 체커가 30초(빠른 체크는 10초)마다 묻고, 연속 3회(기본 실패 임계값) 실패하면 비정상으로 센다. 체커의 18%를 넘게 정상이라고 보면 정상으로 친다.
 
-Route 53의 18%는 일부 지역에서만 길이 끊긴 것을 장애로 보지 않으려는 값이다. 간격과 횟수를 줄이면 빨리 알아채지만 잠깐의 지연이나 GC 멈춤도 장애로 본다. etcd 문서가 선거 제한 시간을 멤버 사이 왕복 시간의 10배 이상으로 두라고 하는 것도 네트워크가 한두 번 흔들려서는 선거가 열리지 않게 하려는 비율이다.
+Route 53의 18%는 일부 지역에서만 길이 끊긴 것을 장애로 보지 않으려는 값이다. 간격과 횟수를 줄이면 빨리 알아채지만 잠깐의 지연이나 GC 멈춤(메모리 정리로 프로세스가 잠시 서는 것)도 장애로 본다. etcd 문서가 선거 제한 시간을 멤버 사이 왕복 시간의 10배 이상으로 두라고 하는 것도 네트워크가 한두 번 흔들려서는 선거가 열리지 않게 하려는 비율이다.
 
 신호가 끊긴 것만으로는 **상대가 죽은 것과 상대와의 길만 끊긴 것을 구분하지 못한다**. 두 대만 있는 구성은 이 둘을 같은 장애로 처리한다.
 
 ## 요청 전환
 
-감지한 뒤에는 클라이언트가 쓰는 주소가 남은 쪽을 가리키게 바꾼다. 주소를 바꾸는 자리가 IP, 프록시, DNS 가운데 어디냐에 따라 전환에 드는 시간이 다르다.
+감지한 뒤에는 클라이언트가 쓰는 주소가 남은 쪽을 가리키게 바꾼다. 주소를 바꾸는 자리가 IP, 프록시, 이름, DNS 가운데 어디냐에 따라 전환에 드는 시간이 다르다.
 
-- IP를 옮긴다(VIP): 새 MASTER는 gratuitous ARP를 보낸다. 묻지 않았는데 "이 IP는 이 MAC"이라고 알리는 패킷이라, 스위치와 이웃 호스트가 ARP 표를 고친다. keepalived는 전환 직후 5개를 보내고 5초 뒤 한 번 더 보낸다(`garp_master_repeat`, `garp_master_delay` 기본 5). 클라이언트 설정은 그대로다.
-- 프록시가 대상을 바꾼다: nginx upstream은 서버와의 통신이 `fail_timeout`(기본 10초) 안에 `max_fails`(기본 1회)만큼 실패하면 그 서버를 10초 동안 빼고 `backup` 서버로 보낸다. CloudFront 오리진 그룹은 1차 오리진에 연결이 안 되면 같은 요청을 2차로 보내는데, 기본값이 10초씩 3번 시도라 30초를 기다린다.
+- IP를 옮긴다(VIP): 같은 네트워크의 장비는 ARP로 IP에 해당하는 MAC 주소(랜카드 고유 주소)를 찾아 표에 적어 둔다. 새 MASTER는 묻지 않았는데 "이 IP는 이 MAC"이라고 알리는 gratuitous ARP를 보내, 스위치와 이웃 호스트가 이 표를 고치게 한다. keepalived는 전환 직후 5개를 보내고 5초 뒤 5개를 더 보낸다(`garp_master_repeat`, `garp_master_delay` 기본 5).
+- 프록시가 대상을 바꾼다: nginx upstream(요청을 넘길 서버 묶음)은 서버와의 통신이 `fail_timeout`(기본 10초) 안에 `max_fails`(기본 1회)만큼 실패하면 그 서버를 10초 동안 빼고 `backup` 서버로 보낸다. CloudFront 오리진 그룹은 1차 원본 서버(오리진)에 연결이 안 되면 같은 요청을 2차로 보내는데, 기본값이 10초씩 3번 시도라 30초를 기다린다.
 - 이름 뒤를 바꾼다: S3 Multi-Region Access Point(MRAP)는 여러 리전 버킷 앞에 이름 하나를 두고, 라우팅 상태를 바꾸면 약 2분 뒤부터 새 요청을 다른 리전으로 보낸다. 이미 열린 연결은 끊지 않는다.
 - DNS 답을 바꾼다: Route 53은 헬스체크가 실패한 레코드를 답에서 뺀다.
 
@@ -114,7 +116,7 @@ S3 교차 리전 복제(CRR)는 대부분의 객체를 몇 초 안에 옮기지�
 
 MongoDB 레플리카셋은 Primary 한 대가 쓰기를 받아 oplog(쓰기 기록)에 적고, Secondary가 그 oplog를 가져가 따라 한다. Primary가 쓰기를 받고 Secondary에 복제하기 전에 멈추면 새 Primary는 그 쓰기를 모른다. 돌아온 옛 Primary는 새 Primary에 맞추려고 자기만 가진 쓰기를 되돌리는데, 이것을 롤백(rollback)이라고 한다.
 
-쓰기를 언제 성공으로 돌려줄지는 write concern이 정한다.
+쓰기를 언제 성공으로 돌려줄지는 write concern 설정으로 고른다.
 
 - `w: 1`: Primary에 쓰면 바로 성공을 돌려준다.
 - `w: "majority"`: 투표 멤버 과반에 복제된 뒤 성공을 돌려준다.
@@ -165,9 +167,9 @@ MongoDB Primary는 투표 멤버 과반과 연락이 닿지 않으면 스스로 
 
 etcd FAQ와 MongoDB 문서의 과반 계산이다.
 
-etcd가 과반으로 쓰기를 정하므로 kubeadm 컨트롤 플레인도 세 대, 다섯 대처럼 홀수로 둔다. 데이터를 두 벌만 둘 여유가 있으면 Arbiter로 세 번째 표를 만든다(Percona Operator 같은 운영 도구에서는 설정 한 줄이다). 데이터 멤버가 이미 세 대인데 Arbiter를 더하면 투표 멤버가 넷이 되어 버티는 장애 수는 그대로다.
+etcd가 과반으로 쓰기를 정하므로 kubeadm 컨트롤 플레인도 세 대, 다섯 대처럼 홀수로 둔다. 데이터를 두 벌만 둘 여유가 있으면 Arbiter로 세 번째 표를 만든다. 다만 앞 절처럼 PSA는 기본 write concern이 `w: 1`이 되므로 롤백 위험을 함께 진다. 데이터 멤버가 이미 세 대인데 Arbiter를 더하면 투표 멤버가 넷이 되어 버티는 장애 수는 그대로다.
 
-VRRP에는 투표가 없다. 그래서 keepalived 쌍은 광고가 막히지 않게 하는 것으로 스플릿 브레인을 막는다. VRRP는 IP 프로토콜 112번이라 TCP나 UDP 포트 규칙으로는 열리지 않는다.
+VRRP에는 투표가 없다. 그래서 keepalived 쌍은 광고가 막히지 않게 하는 것으로 스플릿 브레인을 막는다. VRRP는 TCP(6번), UDP(17번)와 나란한 IP 프로토콜 112번이라 TCP나 UDP 포트 규칙으로는 열리지 않는다.
 
 ```bash
 iptables -I INPUT  -p vrrp -j ACCEPT
@@ -207,5 +209,4 @@ ip -4 addr show dev eth0 | grep -w 10.0.0.100
 - [MongoDB — Replica Set Elections](https://www.mongodb.com/docs/manual/core/replica-set-elections/)
 - [MongoDB — Write Concern](https://www.mongodb.com/docs/manual/reference/write-concern/)
 - [MongoDB — Rollbacks During Replica Set Failover](https://www.mongodb.com/docs/manual/core/replica-set-rollbacks/)
-- [Percona Operator for MongoDB — Arbiter](https://docs.percona.com/percona-operator-for-mongodb/arbiter.html)
 - 원글: [CDN 이중화](https://kimjanghyun1010.tistory.com/117), [MRAP로 S3 고가용성 구성](https://kimjanghyun1010.tistory.com/116), [kubeadm 설치 (w/ master HA)](https://kimjanghyun1010.tistory.com/103), [Docker Compose Active-Standby 구성 (w/ nginx)](https://kimjanghyun1010.tistory.com/88), [Percona MongoDB](https://kimjanghyun1010.tistory.com/40)

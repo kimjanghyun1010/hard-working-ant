@@ -21,7 +21,7 @@ node_cpu_seconds_total{cpu="0",mode="user"} 912.07
 
 중괄호 안의 `cpu="0"` 같은 이름과 값 쌍을 라벨(label)이라 하고, 지표 이름과 라벨 값이 모두 같은 줄이 시간에 따라 쌓인 것을 시계열(time series) 하나로 센다. 위 두 줄은 시계열 두 개다.
 
-`/metrics`를 내주는 프로그램을 exporter라고 한다. OS나 드라이버가 세는 숫자를 이 형식으로 바꿔 준다. node_exporter(9100)는 `/proc`와 `/sys`를, windows_exporter(9182)는 성능 카운터와 WMI를, nvidia_gpu_exporter(9835)는 NVIDIA 드라이버 라이브러리(NVML)를 읽는다.
+`/metrics`를 내주는 프로그램을 exporter라고 한다. OS나 드라이버가 세는 숫자를 이 형식으로 바꿔 준다. 리눅스 서버용 node_exporter는 커널이 숫자를 내놓는 `/proc`와 `/sys`를 읽는다.
 
 아래 그림처럼 대상마다 한 칸씩 쌓인다.
 
@@ -36,11 +36,13 @@ node_cpu_seconds_total{cpu="0",mode="user"} 912.07
 
 가져가는 쪽이 Prometheus라서 대상이 죽은 것도 Prometheus가 먼저 안다. 대상이 값을 보내는(push) 방식이면 값이 안 올 때 대상이 죽은 것인지 보낼 게 없는 것인지 따로 가려야 한다.
 
-조회할 때는 그 시각 이전의 가장 최근 샘플을 답으로 쓰고, 5분(`--query.lookback-delta`)보다 오래된 샘플은 버린다. 대상이 목록에서 빠지거나 어떤 시계열이 응답에서 사라지면 Prometheus는 그 시계열에 stale 표시를 남겨 그래프에서 바로 끊는다. 점과 점 사이에서 일어난 일은 Prometheus가 모른다.
+조회할 때는 그 시각 이전의 가장 최근 샘플을 답으로 쓰고, 5분(`--query.lookback-delta`)보다 오래된 샘플은 버린다. 대상이 목록에서 빠지거나 어떤 시계열이 응답에서 사라지면 Prometheus는 그 시계열에 끊겼다는 표시(stale)를 남겨 그래프를 바로 끊는다.
+
+점과 점 사이에서 일어난 일은 Prometheus가 모른다.
 
 ## 수집 실패와 외부 프로브
 
-`up`이 1이라는 것은 `/metrics`가 200을 돌려줬다는 뜻까지다. exporter가 값을 다른 곳에서 읽어 오는 구조라면 그 읽기가 실패해도 `/metrics`는 멀쩡히 응답한다. 큐의 컨슈머 수를 RabbitMQ API로 읽어 내주는 exporter를 `prometheus_client`로 만들면 이렇다.
+`up`이 1이라는 것은 `/metrics`가 200을 돌려줬다는 뜻까지다. exporter가 값을 다른 곳에서 읽어 오는 구조라면 그 읽기가 실패해도 `/metrics`는 멀쩡히 응답한다. 큐에서 메시지를 꺼내 가는 컨슈머의 수를 RabbitMQ API로 읽어 내주는 exporter를 파이썬 라이브러리 `prometheus_client`로 만들면 이렇다.
 
 ```python
 from prometheus_client import start_http_server, Gauge
@@ -65,7 +67,9 @@ if __name__ == '__main__':
         time.sleep(10)
 ```
 
-조회가 실패하면 Gauge는 직전 값을 그대로 내준다. 실제 컨슈머는 0인데 그래프는 5에서 평평하고, `up`도 1이다. 그래서 마지막 성공 시각을 같이 내보내고, 그 시각이 오래되면 PromQL(Prometheus의 조회 언어) 조건으로 알린다. nvidia_gpu_exporter도 마지막 수집의 성공 여부를 `nvidia_smi_last_collect_success`(성공 1, 실패 0)로 내준다.
+조회가 실패하면 Gauge는 직전 값을 그대로 내준다. 실제 컨슈머는 0인데 그래프는 5에서 평평하고, `up`도 1이다.
+
+그래서 마지막 성공 시각을 같이 내보내고, 그 시각이 오래되면 PromQL(Prometheus의 조회 언어) 조건으로 알린다. GPU용 nvidia_gpu_exporter도 같은 이유로 마지막 수집의 성공 여부를 `nvidia_smi_last_collect_success`(성공 1, 실패 0)로 내준다.
 
 ```promql
 time() - rabbitmq_poll_last_success_timestamp_seconds > 60
@@ -116,7 +120,7 @@ time() - rabbitmq_poll_last_success_timestamp_seconds > 60
   <figcaption>같은 요청을 Gauge와 Counter로 내보냈을 때 남는 값</figcaption>
 </figure>
 
-"지난 1초 요청 수"를 Gauge로 내보내면 15초와 30초에 찍힌 값이 둘 다 평소 수준이라 몰림이 없다. Counter로 내보내면 두 수집 사이에 늘어난 양이 다음 값에 그대로 실려, 초당 증가량으로 바꾸면 그 구간이 솟는다. 두 모드의 요청은 같고, Gauge는 **순간을** Counter는 **누적을** 넘겨서 결과가 갈린다.
+"지난 1초 요청 수"를 Gauge로 내보내면 15초와 30초에 찍힌 값이 둘 다 평소 수준이라 몰림이 없다. Counter로 내보내면 두 수집 사이에 늘어난 양이 다음 값에 그대로 실려, 초당 증가량으로 바꾸면 그 구간이 솟는다. Gauge는 **수집 순간의 값**만 넘기고, Counter는 지난 수집 뒤로 쌓인 양을 놓치지 않는다.
 
 Counter는 기울기로 읽는다. `rate()`는 범위 안 샘플의 증가량을 초로 나눠 초당 증가량을 낸다. 범위 양 끝에 샘플이 딱 맞지 않으므로 범위 끝까지 늘려 잡아(extrapolation) 계산하고, 값이 줄어든 지점은 재시작으로 보고 이어 붙인다.
 
@@ -124,17 +128,19 @@ Counter는 기울기로 읽는다. `rate()`는 범위 안 샘플의 증가량을
 rate(http_requests_total{job="api"}[5m])
 ```
 
-범위 안에는 샘플이 두 개 이상 있어야 해서, Grafana의 `$__rate_interval`은 범위를 수집 주기의 4배 이상으로 잡는다.
+범위 안에는 샘플이 두 개 이상 있어야 해서, 대시보드 도구 Grafana의 `$__rate_interval`은 범위를 수집 주기의 4배 이상으로 잡는다.
 
 여러 시계열을 합칠 때는 `sum(rate(...))`처럼 rate를 먼저 한다. 먼저 합치면 시계열 하나가 재시작해 0이 된 것이 합계의 작은 감소로 묻혀 rate가 보정하지 못한다.
 
 [CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %})의 CPU 사용률도 idle 시간 Counter의 rate를 1에서 뺀 값이다.
 
-rate 값은 범위 전체의 평균이다. `[5m]`이면 9초 동안 초당 90건 늘어난 몰림이 5분에 퍼져 초당 3건 남짓 오른 것으로만 보인다. 범위를 줄이면 몰림이 살아나지만, 15초 수집에서 `[30s]` 아래로 내리면 샘플이 두 개가 안 돼 값이 빈다. 응답 시간도 평균 내면 소수의 느린 요청이 묻힌다.
+rate 값은 범위 전체의 평균이다. `[5m]`이면 9초 동안 초당 90건 늘어난 몰림(810건)이 300초에 퍼져 초당 2.7건 오른 것으로만 보인다. 범위를 줄이면 몰림이 살아나지만, 15초 수집에서 `[30s]` 아래로 내리면 샘플이 두 개가 안 돼 값이 빈다. 응답 시간도 평균 내면 소수의 느린 요청이 묻힌다.
 
 ## Histogram
 
-평균 응답 시간이 0.12초여도 100건 중 1건이 1초 가까이 걸릴 수 있다. Histogram은 응답 시간을 구간(bucket)별로 세어 두고, 조회할 때 백분위수를 계산하게 해 준다. Histogram 하나는 Counter 여러 개로, 버킷마다 "이 값 이하인 요청 수"를 누적해서 센다.
+평균 응답 시간이 0.12초여도 100건 중 1건이 1초 가까이 걸릴 수 있다. 이런 꼬리는 백분위수로 본다. p99는 요청을 빠른 순으로 줄 세웠을 때 99% 지점의 값이다.
+
+Histogram은 응답 시간을 구간(bucket)별로 세어 두고, 조회할 때 백분위수를 계산하게 해 준다. Histogram 하나는 Counter 여러 개로, 버킷마다 "이 값 이하인 요청 수"를 누적해서 센다.
 
 ```text
 http_request_duration_seconds_bucket{le="0.1"}  700
@@ -158,7 +164,9 @@ http_request_duration_seconds_count 1000
 histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
 ```
 
-버킷 경계 사이는 추정값이다. Prometheus 문서의 예에서는 200~300ms 버킷에 걸린 p95를 295ms로 계산하지만 실제 값은 그 100ms 안 어디든 될 수 있다. 백분위수가 `+Inf` 버킷에 걸리면 바로 아래 경계값이 답으로 나와, 1초를 넘는 요청은 얼마나 느린지 알 수 없다. 그래서 경계는 목표 응답 시간(예: 0.3초) 근처에 촘촘히 둔다.
+버킷 경계 사이는 추정값이다. Prometheus 문서의 예에서는 요청이 220ms 근처에 몰려 있는데, 200~300ms 버킷에 걸린 p95를 295ms로 계산한다.
+
+백분위수가 `+Inf` 버킷에 걸리면 바로 아래 경계값이 답으로 나와, 1초를 넘는 요청은 얼마나 느린지 알 수 없다. 그래서 경계는 목표 응답 시간(예: 0.3초) 근처에 촘촘히 둔다.
 
 앱이 p99를 직접 계산해 내주는 Summary는 파드 셋의 p99를 평균 내도 전체 p99가 되지 않는다. Histogram은 버킷 개수를 더한 뒤 계산해 여러 파드의 p99를 낸다.
 
@@ -168,7 +176,9 @@ p99가 목표를 넘어도 Prometheus는 그 값을 TSDB에 적을 뿐 아무도
 
 ## 알림 규칙과 Alertmanager
 
-사람을 부르는 일은 둘로 나뉜다. Prometheus가 규칙을 평가해 알림을 만들고, Alertmanager가 받아 Slack 같은 곳으로 보낸다. 알림 규칙은 PromQL 조건 하나와 `for` 하나이고, Prometheus는 규칙을 `evaluation_interval`(기본 1분)마다 평가한다. 조건이 처음 참이 되면 pending, `for` 동안 평가마다 계속 참이면 firing이 되어 Alertmanager로 간다.
+사람을 부르는 일은 둘로 나뉜다. Prometheus가 규칙을 평가해 알림을 만들고, Alertmanager가 받아 Slack 같은 곳으로 보낸다.
+
+알림 규칙은 PromQL 조건 하나와 `for` 하나이고, Prometheus는 규칙을 `evaluation_interval`(기본 1분)마다 평가한다. 조건이 처음 참이 되면 대기 상태(pending), `for` 동안 평가마다 계속 참이면 발생 상태(firing)가 되어 Alertmanager로 간다.
 
 {% raw %}
 ```yaml
@@ -230,7 +240,7 @@ receivers:
       - api_url_file: /etc/alertmanager/secrets/slack-cert
 ```
 
-`inhibit_rules`는 원인 알림이 떠 있는 동안 그 결과 알림을 막는다. 위 설정이면 SwitchDown이 뜬 랙의 HostDown은 보내지 않아, 원인인 스위치 알림만 남는다. Slack 웹훅 주소는 비밀값이라 `api_url_file`로 읽는다.
+`inhibit_rules`는 원인 알림이 떠 있는 동안 그 결과 알림을 막는다. 위 설정이면 SwitchDown이 뜬 랙의 HostDown은 보내지 않아, 원인인 스위치 알림만 남는다.
 
 ## TSDB와 장기 보관
 
@@ -244,12 +254,12 @@ receivers:
        ≈ 35GB
 ```
 
-로컬 저장소는 묶이지도 복제되지도 않아서, 디스크 하나에 15일만 남고 두 클러스터를 한 그래프에 그릴 수도 없다. Thanos는 완성된 2시간 블록을 객체 저장소로 올리고, 여러 Prometheus와 저장소를 하나처럼 조회하게 한다.
+로컬 저장소는 묶이지도 복제되지도 않아서, 디스크 하나에 15일만 남고 두 클러스터를 한 그래프에 그릴 수도 없다. Thanos는 완성된 2시간 블록을 S3 같은 객체 저장소(용량 걱정 없이 파일을 쌓는 저장소)로 올리고, 여러 Prometheus와 저장소를 하나처럼 조회하게 한다.
 
 - sidecar: Prometheus 옆에서 블록을 올리고, 최근 데이터 조회에 답한다.
 - store gateway: 객체 저장소의 블록으로 답한다.
 - query: 둘의 결과를 합치고 중복을 지운다.
-- compactor: 블록을 합치고 다운샘플링한다. 동시 실행에 안전하지 않아 하나만 띄운다.
+- compactor: 블록을 합치고 해상도를 낮춘 사본을 만든다(다운샘플링). 동시 실행에 안전하지 않아 하나만 띄운다.
 
 아래 그림처럼 query는 최근 구간은 sidecar에, 그 이전은 store gateway에 묻는다.
 
@@ -257,7 +267,9 @@ receivers:
   <figcaption>두 클러스터의 Prometheus와 Thanos</figcaption>
 </figure>
 
-sidecar를 붙이면 Prometheus의 블록 크기 하한과 상한(`--storage.tsdb.min-block-duration`, `max-block-duration`)을 둘 다 2h로 맞춘다. Prometheus가 스스로 블록을 합치면 이미 올린 블록과 겹쳐 compactor가 다루는 데이터가 깨질 수 있어서다. 각 Prometheus의 `external_labels`(예: `cluster: sub-1`)는 전체 Thanos 안에서 고유해야 query가 어느 클러스터의 데이터인지 가른다. kube-prometheus-stack(Prometheus를 오퍼레이터와 함께 까는 Helm 차트)에서는 `externalLabels`와 `thanos.objectStorageConfig`를 주면 오퍼레이터(설정 리소스를 보고 Prometheus를 만들고 고치는 컨트롤러)가 sidecar를 붙인다.
+sidecar를 붙이면 Prometheus의 블록 크기 하한과 상한(`--storage.tsdb.min-block-duration`, `max-block-duration`)을 둘 다 2h로 맞춘다. Prometheus가 스스로 블록을 합치면 이미 올린 블록과 겹쳐 compactor가 다루는 데이터가 깨질 수 있어서다.
+
+각 Prometheus에는 `external_labels`(예: `cluster: sub-1`)로 이름표를 단다. 이 값이 전체 Thanos 안에서 고유해야 query가 어느 클러스터의 데이터인지 가른다.
 
 15초 원본이면 시계열 하나가 1년에 약 210만 개 샘플이라 1년 그래프가 열리지 않는다. compactor는 40시간이 지난 원본에서 5분 해상도 사본을, 10일이 지난 5분 해상도에서 1시간 해상도 사본을 만든다. 1시간 해상도면 1년이 8,760개다.
 

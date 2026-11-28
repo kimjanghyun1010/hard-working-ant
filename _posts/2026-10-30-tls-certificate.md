@@ -20,9 +20,9 @@ TLS는 둘을 나눠 쓴다. 데이터는 대칭키(세션키)로 암호화하�
   <figcaption>대칭키 암호화, 키 합의, 서명</figcaption>
 </figure>
 
-ECDHE(Elliptic Curve Diffie-Hellman Ephemeral)에서 양쪽은 연결마다 비밀값을 새로 뽑고, 비밀값에서 계산한 공개값만 보낸다. 브라우저는 자기 비밀값과 서버 공개값을, 서버는 자기 비밀값과 브라우저 공개값을 섞어 같은 결과를 얻는다. 중간에서 두 공개값을 다 봐도 비밀값 없이 결과를 구하려면 타원곡선 이산로그 문제를 풀어야 해서 현실적으로 계산할 수 없다.
+ECDHE(Elliptic Curve Diffie-Hellman Ephemeral)에서 양쪽은 연결마다 비밀값을 새로 뽑고, 비밀값에서 계산한 공개값만 보낸다. 브라우저는 자기 비밀값과 서버 공개값을, 서버는 자기 비밀값과 브라우저 공개값을 섞어 같은 결과를 얻는다. 중간에서 두 공개값을 다 봐도 공개값에서 비밀값을 거꾸로 구하는 계산(타원곡선 이산로그)이 현실적으로 불가능해 결과를 알 수 없다.
 
-TLS 1.2까지는 세션키를 서버 공개키로 암호화해 보내는 RSA 키 전송도 있었다. 이 방식은 서버 개인키가 나중에 새면 녹화해 둔 과거 통신까지 풀린다. ECDHE는 연결이 끝나면 비밀값을 버려서 개인키가 새도 지난 통신이 안전하고, 이를 전방 보안(forward secrecy)이라고 한다. TLS 1.3은 RSA 키 전송과 고정 DH를 빼서 모든 키 교환이 전방 보안을 갖는다.
+TLS 1.2까지는 세션키를 서버 공개키로 암호화해 보내는 RSA 키 전송도 있었다. 이 방식은 서버 개인키가 나중에 새면 녹화해 둔 과거 통신까지 풀린다. ECDHE는 연결이 끝나면 비밀값을 버려서 개인키가 새도 지난 통신이 안전하고, 이를 전방 보안(forward secrecy)이라고 한다. TLS 1.3은 키를 재사용하는 방식을 모두 빼서 모든 연결이 전방 보안을 갖는다.
 
 키 합의에는 빈틈이 하나 남는다. 공개값에는 보낸 사람이 적혀 있지 않아서, 중간자가 양쪽에 자기 공개값을 끼워 넣으면 브라우저와 중간자, 중간자와 서버가 따로 키를 합의한다. 그래서 서버는 자기 개인키로 공개값에 서명하고, 브라우저는 그 서명을 서버 공개키로 확인한다.
 
@@ -30,16 +30,16 @@ TLS 1.2까지는 세션키를 서버 공개키로 암호화해 보내는 RSA 키
 
 ### 메시지 순서
 
-핸드셰이크(handshake)는 알고리즘 선택, 키 합의, 서명을 한 번의 주고받기에 담는다. TLS 1.3의 메시지 순서는 이렇다.
+핸드셰이크(handshake)는 알고리즘 조합(cipher suite) 선택, 키 합의, 서명을 한 번의 주고받기에 담는다. TLS 1.3의 메시지 순서는 이렇다.
 
 ```text
 ClientHello          지원 버전, cipher suite 목록, key_share(브라우저 공개값)
 ServerHello          고른 cipher suite, key_share(서버 공개값)
   -- 여기부터 핸드셰이크 키로 암호화 --
-EncryptedExtensions
+EncryptedExtensions  나머지 협상 결과
 Certificate          서버 인증서와 중간 인증서
 CertificateVerify    지금까지 오간 메시지 해시에 대한 서명
-Finished
+Finished             핸드셰이크 전체가 변조되지 않았다는 확인값
 ```
 
 ClientHello에 공개값을 미리 실어 보내서 서버는 ServerHello 직후 세션키를 계산하고, 인증서부터 암호화해 보낸다. 브라우저가 미리 고른 곡선을 서버가 지원하지 않으면 서버가 HelloRetryRequest로 다른 곡선을 요구하고, 이때는 왕복이 하나 늘어난다.
@@ -54,7 +54,7 @@ TLS 1.2는 같은 일에 2 RTT(Round Trip Time, 요청이 갔다가 응답이 �
   <figcaption>왕복 100ms 서버에서 첫 응답까지 걸리는 시간</figcaption>
 </figure>
 
-TLS 1.2는 400ms, TLS 1.3은 300ms에 첫 응답이 온다. 암호 계산량은 거의 같고, 줄어든 100ms는 메시지를 기다리던 시간이다. 차이는 왕복 시간에 비례해서 같은 리전 서버끼리(왕복 1ms)는 거의 없고, 해외 사용자나 모바일망에서 커진다. 연결을 재사용하면 핸드셰이크 자체를 건너뛰므로 서버 사이 호출은 keep-alive와 커넥션 풀부터 확인한다.
+TLS 1.2는 400ms, TLS 1.3은 300ms에 첫 응답이 온다. 암호 계산량은 거의 같고, 줄어든 100ms는 메시지를 기다리던 시간이다. 그래서 차이는 왕복 시간에 비례해 같은 리전 서버끼리(왕복 1ms)는 거의 없고, 해외 사용자나 모바일망에서 커진다. 연결을 재사용하면 핸드셰이크 자체를 건너뛰므로 서버 사이 호출은 keep-alive와 커넥션 풀부터 확인한다.
 
 ### cipher suite 협상
 
@@ -78,7 +78,7 @@ nginx는 받을 버전을 `ssl_protocols`(최신 기본값 `TLSv1.2 TLSv1.3`)로
   <figcaption>클라이언트 목록과 서버 목록이 겹치는 줄</figcaption>
 </figure>
 
-Mozilla 권장 설정 6.0은 둘로 나뉜다. Intermediate는 IE 11, Java 8u161 같은 오래된 클라이언트까지 받고, Modern은 Firefox 63, Chrome 70, Java 11 이후만 받는다. 두 설정 모두 키 합의 곡선의 맨 앞에 X25519MLKEM768을 둔다. X25519에 양자 내성 알고리즘 ML-KEM을 섞은 방식이다.
+Mozilla 권장 설정 6.0은 둘로 나뉜다. Intermediate는 IE 11, Java 8u161처럼 TLS 1.2까지만 아는 클라이언트도 받고, Modern은 TLS 1.3을 아는 Chrome 70, Java 11 이후만 받는다.
 
 ```nginx
 # Intermediate: TLS 1.2 클라이언트도 받는다
@@ -102,7 +102,7 @@ openssl s_client -connect shop.example.com:443 -tls1_2 </dev/null | grep -E "Pro
 
 클라이언트는 인증서에서 네 가지를 확인한다.
 
-- 이름: 접속한 주소가 SAN(Subject Alternative Name)에 있는지. CN은 보지 않고, 와일드카드 `*.shop.example.com`은 바로 아래 한 단계 이름만 맞는다(RFC 9525).
+- 이름: 접속한 주소가 SAN(Subject Alternative Name, 인증서가 덮는 이름 목록)에 있는지. 예전에 이름을 적던 CN(Common Name)은 보지 않고, 와일드카드 `*.shop.example.com`은 바로 아래 한 단계 이름만 맞는다(RFC 9525).
 - 기간: 오늘이 notBefore와 notAfter 사이인지.
 - 용도: extendedKeyUsage에 serverAuth가 있고, CA 인증서가 아닌지(basicConstraints CA:FALSE).
 - 서명: 발급자(Issuer)의 공개키로 인증서 서명이 맞는지.
@@ -172,7 +172,7 @@ OCSP 주소가 없는 인증서에 stapling을 켜면 nginx는 `"ssl_stapling" i
 </figure>
 
 - CA/B 포럼 SC-081: 398일이던 상한이 2026년 3월 15일부터 200일, 2027년 3월 15일부터 100일, 2029년 3월 15일부터 47일이다.
-- Let's Encrypt: 지금 90일이다. 2027년 2월 10일부터 기본 64일, 2028년 2월 16일부터 45일이 된다. 도메인 소유 확인 결과를 재사용하는 기간도 지금 30일에서 2028년 2월 16일부터 7시간으로 줄어든다.
+- Let's Encrypt: 지금 90일이다. 2027년 2월 10일부터 기본 64일, 2028년 2월 16일부터 45일이 된다.
 
 47일이면 1년에 8번 갱신해야 하므로 ACME(CA에 발급과 갱신을 자동으로 요청하는 프로토콜, RFC 8555) 클라이언트인 cert-manager나 certbot으로 자동화한다. Let's Encrypt는 60일 고정 갱신으로는 부족하다며, CA가 갱신 시점을 알려 주는 ARI(ACME Renewal Information)를 쓰거나 수명의 3분의 2 지점에서 갱신하라고 권한다.
 
@@ -182,7 +182,7 @@ OCSP 주소가 없는 인증서에 stapling을 켜면 nginx는 `"ssl_stapling" i
 
 사내 도메인(shop.home.lan)이나 클러스터 내부 통신에는 공인 CA가 인증서를 발급하지 않는다. 직접 CA를 만들어 서명하고, 그 CA 인증서를 클라이언트의 신뢰 저장소에 넣는다. CA 한 장만 신뢰시키면 서버 인증서는 몇 장이든 추가 배포 없이 통한다.
 
-OpenSSL 3.0 이상에서는 명령 세 줄이다.
+OpenSSL 3.0 이상에서는 세 단계다.
 
 ```bash
 # 1. CA
@@ -213,7 +213,7 @@ CSR(Certificate Signing Request)에는 서버 공개키와 이름만 담기고, 
 
 ### 쿠버네티스 인증서
 
-쿠버네티스는 사설 CA를 계정 시스템으로도 쓴다. API 서버는 mTLS로 `--client-ca-file`의 CA가 서명한 클라이언트 인증서를 받으면, 주체(Subject) 필드의 CN(Common Name, 이름)을 사용자 이름으로, O(Organization, 조직)를 그룹으로 읽는다. 인증서 한 장이 곧 계정 하나라서 kubernetes-the-hard-way는 컴포넌트마다 인증서를 따로 만든다.
+쿠버네티스는 사설 CA를 계정 시스템으로도 쓴다. API 서버는 mTLS로 `--client-ca-file`의 CA가 서명한 클라이언트 인증서를 받으면, 주체(Subject) 필드의 CN을 사용자 이름으로, O(Organization)를 그룹으로 읽는다. 인증서 한 장이 곧 계정 하나라서, 손으로 클러스터를 세우는 공개 튜토리얼 kubernetes-the-hard-way는 컴포넌트마다 인증서를 따로 만든다.
 
 | 인증서 | CN (사용자) | O (그룹) | 권한 |
 |---|---|---|---|
@@ -225,23 +225,25 @@ CSR(Certificate Signing Request)에는 서버 공개키와 이름만 담기고, 
 
 값은 kubernetes-the-hard-way의 `ca.conf` 기준이고, O는 권한에 쓰이는 것만 적었다.
 
-아래 그림처럼 kubelet 인증서는 Node 인가(kubelet에 자기 노드 관련 객체만 허락하는 인가 모드)로 자기 노드 것만 읽고, admin 인증서는 인가 검사를 통째로 건너뛴다.
+인증 다음의 인가(authorization)는 그 계정이 요청한 일을 해도 되는지 판단한다. 아래 그림처럼 kubelet 인증서는 Node 인가(kubelet에 자기 노드 관련 객체만 허락하는 모드)로 자기 노드 것만 읽고, admin 인증서는 인가 검사를 통째로 건너뛴다.
 
 <figure class="fig" data-figure="tls-certificate-k8s">
   <figcaption>API 서버가 클라이언트 인증서를 계정으로 읽는 과정</figcaption>
 </figure>
 
-system:masters 그룹은 RBAC 검사를 건너뛰고, 인가 웹훅에도 요청이 가지 않아서 RoleBinding을 지워도 권한이 회수되지 않는다. 쿠버네티스는 클라이언트 인증서 폐기도 지원하지 않아 한 번 발급한 인증서는 만료까지 유효하고, kubeadm 기본값으로 1년(CA는 10년)이다. 새어 나간 admin 인증서를 막으려면 CA를 바꾸고 전부 다시 발급해야 한다.
+system:masters 그룹은 RBAC(역할을 만들고 RoleBinding으로 계정에 묶어 권한을 주는 방식) 검사를 건너뛰고 인가 웹훅에도 가지 않는다. 그래서 RoleBinding을 지워도 권한이 회수되지 않는다.
+
+쿠버네티스는 클라이언트 인증서 폐기도 지원하지 않아 한 번 발급한 인증서는 만료까지 유효하고, kubeadm 기본값으로 1년(CA는 10년)이다. 새어 나간 admin 인증서를 막으려면 CA를 바꾸고 전부 다시 발급해야 한다.
 
 API 서버 인증서의 SAN에는 `127.0.0.1`, 서비스 IP `10.32.0.1`, `kubernetes.default.svc.cluster.local`처럼 접속에 쓰는 이름을 전부 넣는다. 사람 계정은 OIDC(OpenID Connect, 외부 로그인 서비스의 토큰으로 사용자를 확인하는 표준) 같은 외부 인증에 RBAC를 붙이고, system:masters 인증서는 비상용으로 따로 보관한다.
 
 ## 정리
 
-- ECDHE는 공개값만 주고받아 세션키를 만든다. 연결마다 새 키라 전방 보안이 있지만, 공개값만으로는 상대가 누구인지 모른다.
-- 서버는 CertificateVerify로 핸드셰이크 전체에 서명한다. TLS 1.3은 1 RTT이고, nginx는 1.2와 1.3의 cipher suite를 다른 지시어로 정한다.
-- 서명한 공개키가 그 도메인의 것임은 루트까지 이어지는 인증서 체인이 증명한다. 중간 인증서를 빼면 브라우저 밖 클라이언트가 실패한다.
-- 유출된 인증서도 서명은 맞다. OCSP는 걷히는 중이고, 수명이 2029년 47일까지 줄어 갱신 자동화가 필수가 된다.
-- 사설 CA에서는 CA 한 장이 신뢰의 뿌리다. 쿠버네티스는 인증서가 곧 계정이고 폐기가 없어서 system:masters 인증서를 나눠 주지 않는다.
+- ECDHE는 공개값만 주고받아 연결마다 새 세션키를 만든다(전방 보안). 공개값만으로는 상대가 누구인지 모른다.
+- 서버는 CertificateVerify로 핸드셰이크 전체에 서명한다. TLS 1.3은 1 RTT다.
+- 그 공개키가 도메인의 것임은 루트까지 이어지는 체인이 증명한다. 중간 인증서를 빼면 브라우저 밖 클라이언트가 실패한다.
+- 유출된 인증서도 서명은 맞다. OCSP는 걷히고 수명은 2029년 47일까지 줄어 갱신을 자동화한다.
+- 쿠버네티스는 인증서가 곧 계정이고 폐기가 없어서 system:masters 인증서를 나눠 주지 않는다.
 
 ## 참고
 

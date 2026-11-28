@@ -35,9 +35,9 @@ Jenkinsfile의 코드 한 줄은 컨트롤러와 에이전트 중 어디서, 어
   <figcaption>빌드 5개가 몰릴 때 고정 에이전트와 파드 에이전트 (빌드 40초, 파드 생성 15초는 가정값)</figcaption>
 </figure>
 
-고정 에이전트 2대면 셋째 빌드부터 큐에서 기다려 마지막 빌드가 120초에 끝난다. 파드 에이전트는 빌드마다 파드를 띄우는 15초를 치르지만 다섯이 같이 돌아 55초에 끝난다. 빌드 하나에 드는 40초는 두 모드가 같아서, 65초의 차이는 전부 **큐에서 기다린 시간**에서 난다.
+고정 에이전트 2대면 셋째 빌드부터 큐에서 기다려 마지막 빌드가 120초에 끝난다. 파드 에이전트는 빌드마다 파드를 띄우는 15초를 치르지만 다섯이 같이 돌아 55초에 끝난다. 고정 에이전트의 마지막 빌드는 큐에서 80초를 기다렸고, 파드 에이전트는 그 대기를 파드 생성 15초로 바꿨다.
 
-파드 에이전트에도 천장이 있다. 헬름 차트는 쿠버네티스 cloud 설정 하나가 띄우는 에이전트 파드 수 상한 `containerCap`을 10으로 두어 열한째 빌드부터 다시 큐에서 기다린다. 노드에 자리가 없으면 파드가 Pending으로 남아 큐 대기가 노드 대기로 바뀔 뿐이라, 빌드용 노드 풀은 오토스케일러와 같이 잡는다.
+파드 에이전트에도 천장이 있다. 헬름 차트는 쿠버네티스 cloud 설정 하나가 띄우는 에이전트 파드 수 상한 `containerCap`을 10으로 두어 열한째 빌드부터 다시 큐에서 기다린다. 노드에 자리가 없으면 파드가 Pending으로 남아 큐 대기가 노드 대기로 바뀔 뿐이라, 빌드용 노드 풀은 노드 수를 자동으로 늘리는 클러스터 오토스케일러와 같이 잡는다.
 
 ## Jenkinsfile 해석
 
@@ -45,7 +45,7 @@ Jenkinsfile의 코드 한 줄은 컨트롤러와 에이전트 중 어디서, 어
 
 에이전트가 수백 개여도 Jenkinsfile을 해석하는 곳은 컨트롤러 하나다. Jenkins는 Jenkinsfile을 CPS(continuation-passing style)로 바꿔 컨트롤러에서 실행한다. CPS는 "다음에 할 일"을 값으로 들고 다니게 코드를 바꾸는 방식이라, 실행 중인 프로그램의 상태를 통째로 디스크에 저장할 수 있다.
 
-저장된 상태는 빌드 디렉터리의 `program.dat`에 남고, 컨트롤러가 재시작되면 파이프라인은 이 파일에서 멈춘 자리부터 이어진다. 기본 내구성 설정 `MAX_SURVIVABILITY`는 스텝마다 기록을 디스크에 쓴다. 쓰기를 줄인 `PERFORMANCE_OPTIMIZED`는 빠르지만, 컨트롤러가 SIGKILL이나 OOM으로 갑자기 끝나면 진행 중이던 빌드를 이어 가지 못할 수 있다.
+저장된 상태는 빌드 디렉터리의 `program.dat`에 남고, 컨트롤러가 재시작되면 파이프라인은 이 파일에서 멈춘 자리부터 이어진다. 기본 내구성 설정 `MAX_SURVIVABILITY`는 스텝마다 기록을 디스크에 쓴다. 쓰기를 줄인 `PERFORMANCE_OPTIMIZED`는 빠르지만, 컨트롤러가 강제 종료(SIGKILL)나 메모리 부족(OOM)으로 갑자기 끝나면 진행 중이던 빌드를 이어 가지 못할 수 있다.
 
 Jenkinsfile 안에서 Groovy인 것과 Jenkins 스텝인 것은 도는 자리가 다르다.
 
@@ -58,9 +58,9 @@ Jenkinsfile 안에서 Groovy인 것과 Jenkins 스텝인 것은 도는 자리가
   <figcaption>같은 파싱을 Groovy와 sh에 맡길 때 컨트롤러가 쓰는 시간 (시간은 대략값)</figcaption>
 </figure>
 
-Groovy로 파싱하면 30초 동안 컨트롤러가 일하고 에이전트는 기다린다. `sh`로 넘기면 같은 30초를 에이전트가 쓰고 컨트롤러는 결과 한 줄만 받는다. 파싱하는 양은 같으니, 차이는 그 30초를 **어느 프로세스가 떠안느냐**에서 난다.
+Groovy로 파싱하면 30초 동안 컨트롤러가 일하고 에이전트는 기다린다. `sh`로 넘기면 같은 30초를 에이전트가 쓰고 컨트롤러는 결과 한 줄만 받는다.
 
-컨트롤러는 모든 빌드의 Groovy를 한 JVM에서 돌려서 이 차이가 빌드 수만큼 쌓인다. 공식 모범 사례 문서는 `readFile`과 `JsonSlurper`를 같이 쓰면 파일이 컨트롤러 메모리에 두 번 올라간다고 적는다.
+컨트롤러는 모든 빌드의 Groovy를 한 JVM에서 돌린다. 빌드 10개가 같이 Groovy로 파싱하면 그 JVM 하나가 300초어치 일을 떠안는다. 공식 모범 사례 문서는 `readFile`과 `JsonSlurper`를 같이 쓰면 파일이 컨트롤러 메모리에 두 번 올라간다고 적는다.
 
 ```groovy
 // 컨트롤러가 파일을 통째로 받아 파싱한다
@@ -74,7 +74,7 @@ Groovy에는 stage 순서와 조건만 두고, 파일 처리, HTTP 호출, 반�
 
 ### sh 스텝
 
-`sh`는 명령을 에이전트로 보낸 뒤 연결을 붙잡고 기다리지 않는다. durable-task 플러그인이 명령을 workspace 옆 임시 디렉터리에 스크립트로 쓰고, 래퍼 셸이 `nohup`으로 띄운다.
+`sh`는 명령을 에이전트로 보낸 뒤 연결을 붙잡고 기다리지 않는다. durable-task 플러그인이 명령을 workspace 옆 임시 디렉터리에 스크립트로 쓰고, 이를 감싼 래퍼 셸이 `nohup`(띄운 셸이 끝나도 명령이 계속 돌게 하는 도구)으로 띄운다.
 
 ```text
 /home/jenkins/agent/workspace/order@tmp/durable-1a2b3c4d/
@@ -83,7 +83,9 @@ Groovy에는 stage 순서와 조건만 두고, 파일 처리, HTTP 호출, 반�
 └── jenkins-result.txt   # 끝나면 종료 코드가 적힌다
 ```
 
-컨트롤러는 `jenkins-log.txt`를 읽어 콘솔 로그에 붙이고, `jenkins-result.txt`가 생기면 스텝을 끝낸다. 읽는 간격은 출력이 없으면 0.25초에서 1.2배씩 15초까지 벌어지고, 출력이 오면 0.25초로 돌아온다. 래퍼는 명령이 도는 동안 3초마다 로그 파일을 touch하고, 컨트롤러는 5분마다 이 시각을 보고 프로세스가 살아 있는지 판단한다.
+컨트롤러는 `jenkins-log.txt`를 읽어 콘솔 로그에 붙이고, `jenkins-result.txt`가 생기면 스텝을 끝낸다. 읽는 간격은 출력이 없으면 0.25초에서 1.2배씩 15초까지 벌어지고, 출력이 오면 0.25초로 돌아온다.
+
+래퍼는 명령이 도는 동안 3초마다 로그 파일을 touch하고, 컨트롤러는 5분마다 이 시각을 보고 프로세스가 살아 있는지 판단한다.
 
 명령이 컨트롤러와 떨어진 프로세스로 돌기 때문에, 컨트롤러가 재시작되는 동안에도 `make test`는 계속 돈다. 컨트롤러는 돌아온 뒤 `program.dat`로 파이프라인을 되살리고, 저장해 둔 위치부터 로그를 다시 읽는다.
 
@@ -101,7 +103,7 @@ Groovy에는 stage 순서와 조건만 두고, 파일 처리, HTTP 호출, 반�
   <figcaption>따옴표에 따라 비밀값을 푸는 자리</figcaption>
 </figure>
 
-값이 명령 문자열에 박히면 셸 프로세스의 인자에 복사돼 `ps` 같은 도구로 보인다. 작은따옴표면 `$TOKEN` 글자가 그대로 가고, 에이전트의 셸이 `withCredentials`가 넣어 둔 환경 변수에서 값을 읽는다.
+값이 명령 문자열에 박히면 셸 프로세스의 인자에 복사돼, 실행 중인 프로세스와 인자를 보여 주는 `ps`로 누구나 볼 수 있다. 작은따옴표면 `$TOKEN` 글자가 그대로 가고, 에이전트의 셸이 `withCredentials`가 넣어 둔 환경 변수에서 값을 읽는다.
 
 ```groovy
 withCredentials([string(credentialsId: 'registry-token', variable: 'TOKEN')]) {
@@ -128,13 +130,13 @@ Warning: A secret was passed to "sh" using Groovy String interpolation, which is
   <figcaption>빌드마다 생기고 지워지는 에이전트 파드</figcaption>
 </figure>
 
-컨테이너가 달라도 소스가 그대로 보이는 것은 workspace 볼륨 덕분이다. 기본값은 노드에 잡는 `emptyDir`이고, 파드의 모든 컨테이너가 같은 경로(`/home/jenkins/agent`)에 마운트한다. `container()` 스텝은 쿠버네티스 API의 exec로 다른 컨테이너에서 명령을 돌린다.
+컨테이너가 달라도 소스가 그대로 보이는 것은 workspace 볼륨 덕분이다. 기본값은 파드가 뜰 때 노드 디스크에 만드는 빈 폴더(`emptyDir`)이고, 파드의 모든 컨테이너가 같은 경로(`/home/jenkins/agent`)에 마운트한다. `container()` 스텝은 쿠버네티스 API의 exec로 다른 컨테이너에서 명령을 돌린다.
 
 차트 기본값이 `podRetention: Never`, `idleMinutes: 0`이라 빌드가 끝나면 파드와 workspace가 함께 지워진다. 남길 파일은 아티팩트나 레지스트리로 내보낸다.
 
 ## 데몬 없는 이미지 빌드
 
-에이전트 파드에서 `docker build`를 부르면 `Cannot connect to the Docker daemon`이 뜬다. 쿠버네티스 1.24에서 dockershim이 빠진 뒤로 노드 런타임은 containerd 같은 CRI 런타임이라, 파드가 이미지 빌드를 맡길 dockerd가 없다. 노드의 `docker.sock`을 마운트하는 우회도 있지만, 그 소켓을 쥔 파드는 노드의 root와 같다.
+에이전트 파드에서 `docker build`를 부르면 `Cannot connect to the Docker daemon`이 뜬다. 쿠버네티스 1.24에서 Docker를 런타임으로 쓰게 해 주던 dockershim이 빠졌다. 그 뒤로 노드는 containerd 같은 런타임으로 컨테이너를 띄우고, 파드가 이미지 빌드를 맡길 Docker 데몬(dockerd)은 없다. 노드의 `docker.sock`을 마운트하는 우회도 있지만, 그 소켓을 쥔 파드는 노드의 root와 같다.
 
 kaniko는 데몬 없이 컨테이너 안에서 이미지를 만든다.
 
@@ -148,7 +150,7 @@ kaniko는 데몬 없이 컨테이너 안에서 이미지를 만든다.
   <figcaption>docker build, kaniko, 한 컨테이너에서 도는 kaniko</figcaption>
 </figure>
 
-Amazon ECS 플러그인의 Fargate 에이전트처럼 컨테이너가 하나뿐인 곳(이슈 #331)에서는 workspace가 마운트가 아니라서, 멀티스테이지의 다음 `FROM`에서 함께 지워지므로 `--ignore-path=/home/jenkins`로 뺀다.
+Jenkins amazon-ecs-plugin의 Fargate 에이전트는 사이드카를 붙일 수 없어(이슈 #331) 에이전트와 kaniko가 한 컨테이너에서 돈다. 여기서는 workspace가 마운트가 아니라서, `FROM`이 여럿인 멀티스테이지 빌드의 다음 `FROM`에서 함께 지워진다. 그래서 `--ignore-path=/home/jenkins`로 뺀다.
 
 kaniko 원 저장소는 2025년 6월 3일에 아카이브됐고, 지금은 Chainguard 포크와 커뮤니티 포크(osscontainertools/kaniko)가 이어 간다.
 
@@ -176,7 +178,7 @@ def call(String image) {
 }
 ```
 
-라이브러리 코드도 Groovy라 컨트롤러에서 돈다. 어떤 권한으로 도는지는 등록한 자리가 정한다.
+라이브러리 코드도 Groovy라 컨트롤러에서 돌고, 받는 권한은 등록한 자리에 따라 다르다.
 
 - 글로벌 라이브러리(Manage Jenkins에 등록): 신뢰된(trusted) 코드다. 샌드박스 밖에서 Java와 Jenkins 내부 API를 제한 없이 부른다.
 - 폴더 라이브러리: 항상 신뢰되지 않은 코드로, Jenkinsfile과 같은 샌드박스 안에서 돈다.
@@ -190,7 +192,7 @@ Jenkins 헬름 차트의 기본 권한 설정은 `loggedInUsersCanDoAnything`이
 - 전역 역할: `Overall/Administer`, `Overall/Read`처럼 Jenkins 전체에 걸린다. 항목 역할에 무엇을 적든 전역 역할이 우선한다.
 - 항목 역할: 정규식 패턴에 맞는 Job과 폴더에만 걸린다. 패턴은 폴더 경로까지 포함한 전체 이름에 맞추고, 대소문자를 가린다.
 
-역할을 받을 그룹은 LDAP나 AD 같은 인증(security realm)에서 온다. Jenkins 자체 사용자 DB에는 그룹 기능이 없고, 로그인한 모든 사용자가 든 `authenticated`만 있다.
+역할을 받을 그룹은 회사 계정 디렉터리인 LDAP나 AD 같은 인증(security realm)에서 온다. Jenkins 자체 사용자 DB에는 그룹 기능이 없고, 로그인한 모든 사용자가 든 `authenticated`만 있다.
 
 항목 역할의 패턴은 끝을 막아 쓴다. `DEV.*`는 `DEV` 폴더뿐 아니라 `DEVOPS` 폴더에도 맞는다. 폴더 안 Job을 쓰려면 폴더 자체에도 권한이 있어야 해서, 폴더와 그 안을 같이 고르는 `DEV($|/.*)` 꼴로 쓴다. 역할 표는 JCasC(Jenkins 설정을 YAML로 적어 기동 때 적용하는 플러그인)로 차트 values에 둔다.
 

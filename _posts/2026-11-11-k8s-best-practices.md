@@ -11,7 +11,7 @@ scripts: [figures/k8s-best-practices.js]
 
 파드를 지우고 새로 띄우는 동안 요청이 하나도 실패하지 않으려면 트래픽을 보내는 쪽이 파드의 상태를 정확히 따라가야 한다. 트래픽을 보내는 쪽은 Service인데, Service는 파드 목록을 직접 들고 있지 않다.
 
-Service는 가상 IP(ClusterIP) 하나다. 실제로 어느 파드로 보낼지는 EndpointSlice라는 객체가 정한다. EndpointSlice 컨트롤러가 Service의 셀렉터에 맞는 파드 IP를 모아 이 객체에 적고, 노드마다 도는 kube-proxy가 이 목록을 iptables 규칙(커널이 패킷의 목적지를 바꾸거나 거르는 규칙)으로 바꾼다. Service IP로 보낸 패킷은 보낸 쪽 노드의 규칙에서 파드 IP 하나로 바뀐다.
+Service는 가상 IP(ClusterIP) 하나다. 실제로 어느 파드로 보낼지는 EndpointSlice라는 객체가 정한다. EndpointSlice 컨트롤러가 Service의 셀렉터(파드를 고르는 라벨 조건)에 맞는 파드 IP를 모아 이 객체에 적고, 노드마다 도는 kube-proxy가 이 목록을 iptables 규칙(커널이 패킷의 목적지를 바꾸거나 거르는 규칙)으로 바꾼다. Service IP로 보낸 패킷은 보낸 쪽 노드의 규칙에서 파드 IP 하나로 바뀐다.
 
 목록의 엔드포인트마다 상태 조건이 셋 붙는다.
 
@@ -27,7 +27,7 @@ kube-proxy는 목록이 바뀔 때마다 규칙을 다시 쓰되, 너무 잦은 
   <figcaption>새 파드 C가 엔드포인트에 들어가는 시점</figcaption>
 </figure>
 
-readiness probe는 kubelet이 `periodSeconds`마다 앱에 묻는 검사다. `failureThreshold`번 연속 실패하면 kubelet이 파드의 Ready를 false로 바꾸고, EndpointSlice 컨트롤러가 그 파드를 모든 Service의 목록에서 뺀다. 아직 Ready가 아닌 컨테이너는 더 빨리 Ready가 되도록 주기보다 자주 검사할 수 있다.
+readiness probe는 kubelet(노드마다 돌며 컨테이너를 띄우고 검사하는 에이전트)이 `periodSeconds`마다 앱에 묻는 검사다. `failureThreshold`번 연속 실패하면 kubelet이 파드의 Ready를 false로 바꾸고, EndpointSlice 컨트롤러가 그 파드를 모든 Service의 목록에서 뺀다. 아직 Ready가 아닌 컨테이너는 빨리 Ready가 되도록 `periodSeconds`와 다른 때에도 검사할 수 있다.
 
 ```yaml
 readinessProbe:
@@ -78,7 +78,7 @@ livenessProbe:
 
 ### startup probe
 
-liveness는 기동 시간도 모른다. 기본값이면 컨테이너가 뜬 뒤 `initialDelaySeconds + failureThreshold × periodSeconds`, 즉 30초 안에 응답하지 못하면 재시작된다. 기동에 60초가 걸리는 JVM 앱은 기동을 끝내지 못하고 재시작을 되풀이하다 CrashLoopBackOff에 빠진다.
+liveness는 기동 시간도 모른다. 기본값이면 컨테이너가 뜬 뒤 `initialDelaySeconds + failureThreshold × periodSeconds`, 즉 30초 안에 응답하지 못하면 재시작된다. 기동에 60초가 걸리는 JVM 앱은 기동을 끝내지 못하고 재시작을 되풀이하다 CrashLoopBackOff(재시작 대기가 점점 늘어나는 상태)에 빠진다.
 
 startup probe가 있으면 kubelet은 그것이 한 번 성공할 때까지 liveness와 readiness를 돌리지 않는다. 기동은 최대 `failureThreshold × periodSeconds`까지 기다리고, 그래도 성공하지 못하면 컨테이너를 끝낸다. 아래 그림처럼 60초 기동이 끝난 뒤에야 liveness가 원래 주기로 돈다.
 
@@ -138,7 +138,7 @@ Deployment가 세는 "사용 가능"은 파드가 Ready가 된 뒤 `minReadySeco
 
 롤링 업데이트가 내리는 옛 파드는 삭제 요청으로 끝난다. API 서버는 파드에 삭제 시각과 유예 시간(`terminationGracePeriodSeconds`, 기본 30초)을 적고, 그때부터 두 갈래가 동시에 움직인다.
 
-- kubelet: preStop 훅을 실행하고, 끝나면 컨테이너의 PID 1에 SIGTERM을 보낸다. 유예 시간이 다 되도록 남은 프로세스는 SIGKILL로 끝낸다.
+- kubelet: preStop 훅(종료 직전에 실행할 명령이나 대기)을 실행하고, 끝나면 컨테이너의 첫 프로세스(PID 1)에 정상 종료를 청하는 SIGTERM을 보낸다. 유예 시간이 다 되도록 남은 프로세스는 강제 종료 신호 SIGKILL로 끝낸다.
 - 컨트롤 플레인: EndpointSlice에서 그 파드를 `terminating: true`, `ready: false`로 바꾼다. 각 노드의 kube-proxy, 인그레스 컨트롤러, 클라우드 로드밸런서가 이를 보고 규칙에서 뺀다.
 
 둘은 서로를 기다리지 않는다. 앱이 SIGTERM을 받자마자 내려가면, 첫 절에서 본 시차만큼 규칙에 남아 있는 동안 들어온 요청이 실패한다. 아래 데모에서 'preStop 없음'과 'preStop sleep 5'를 바꿔 가며 '파드 A 삭제'를 누르고 실패한 요청 수를 비교한다.
@@ -147,7 +147,7 @@ Deployment가 세는 "사용 가능"은 파드가 Ready가 된 뒤 `minReadySeco
   <figcaption>파드 A를 지울 때 규칙에서 빠지는 시점과 SIGTERM (2초는 대략값)</figcaption>
 </figure>
 
-preStop이 없으면 A는 삭제 직후 내려가고, 규칙에서 빠지는 2초 동안 A로 간 요청이 실패한다. preStop에서 5초를 기다리면 규칙에서 먼저 빠진 뒤에 SIGTERM이 와서 실패가 없다. preStop은 SIGTERM과 따로 돌지 않고 끝나야 SIGTERM이 나가므로, 5초를 기다리는 사이 2초짜리 규칙 제거가 먼저 끝난다.
+preStop이 없으면 A는 삭제 직후 내려가고, 규칙에서 빠지는 2초 동안 A로 간 요청이 실패한다. preStop에서 5초를 기다리면 규칙에서 먼저 빠진 뒤에 SIGTERM이 와서 실패가 없다. preStop이 끝나야 SIGTERM이 나가기 때문이다.
 
 ```yaml
 spec:
@@ -176,7 +176,7 @@ process.on('SIGTERM', () => {
 
 ## drain과 PodDisruptionBudget
 
-노드를 업그레이드하거나 줄일 때는 `kubectl drain`으로 노드를 비운다. drain은 노드를 스케줄 불가로 표시(cordon)한 뒤, 그 노드의 파드마다 Eviction API를 부른다. eviction은 파드 삭제와 같은 종료 순서를 밟아서, 앞 절의 preStop과 유예 시간이 그대로 통한다.
+노드를 업그레이드하거나 줄일 때는 `kubectl drain`으로 노드를 비운다. drain은 노드를 스케줄 불가로 표시(cordon)한 뒤, 그 노드의 파드마다 Eviction API(정해진 조건을 지키며 파드를 내보내 달라는 요청)를 부른다. eviction은 파드 삭제와 같은 종료 순서를 밟아서, 앞 절의 preStop과 유예 시간이 그대로 통한다.
 
 문제는 개수다. 롤링 업데이트는 maxUnavailable로 한 번에 내리는 수를 정하지만, drain은 막는 조건이 없으면 노드의 파드를 전부 한꺼번에 내보낸다. 같은 앱 파드가 그 노드에 몰려 있으면 대체 파드가 다른 노드에서 준비될 때까지 남은 파드가 모든 요청을 받는다.
 

@@ -293,7 +293,7 @@
   // DRA: a pod needing 40GB of GPU memory. Counting GPUs can pick the T4 node; a claim on memory picks the A100.
   {
     const SEC = 6, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const notes = ['개수로만 요청하면 T4와 A100이 똑같이 GPU 1개로 보여, 학습 파드가 T4에 배치되고 메모리가 모자란다.', '속성으로 요청하면 스케줄러가 GPU 메모리를 보고 40GB를 넘는 A100 노드만 고른다.'];
+    const notes = ['개수로만 요청하면 T4와 A100이 똑같이 GPU 1개로 보여, 학습 파드가 T4에 배치되고 메모리가 모자란다.', '속성으로 요청하면 스케줄러가 GPU 메모리를 보고 40GB 이상인 A100 노드만 고른다.'];
     fig('dra', {
       height: 276, still: S.at(1) + SEC, scenes: S, notes,
       frame: (ctx, w, h, time, say) => {
@@ -303,7 +303,7 @@
         const pod = { x: 0, y: 112, w: pw, h: 52, t: '학습 파드', s: '40GB 필요', size: 11 };
         const sch = { x: sx, y: 112, w: sw, h: 52, t: '스케줄러', size: 11 };
         C.card(ctx, pod, { fill: BLUE[0], stroke: BLUE[2] });
-        C.text(ctx, dra ? 'memory > 40Gi' : 'gpu: 1', pw / 2, 182, { size: 10, weight: 600, color: U.text, align: 'center' });
+        C.text(ctx, dra ? 'memory ≥ 40Gi' : 'gpu: 1', pw / 2, 182, { size: 10, weight: 600, color: U.text, align: 'center' });
         C.card(ctx, sch, { lit: t >= 1.2 && t < 2.8 });
         C.arrow(ctx, [[pw + 1, 138], [sx - 1, 138]], ease(t, 0.4, 1.2), '#94a3b8');
         const N = [{ y: 52, name: '노드 1', gpu: 'T4 16GB', mem: '16GB' }, { y: 172, name: '노드 2', gpu: 'A100 80GB', mem: '80GB' }];

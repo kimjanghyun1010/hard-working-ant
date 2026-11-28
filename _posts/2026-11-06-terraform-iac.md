@@ -1,6 +1,6 @@
 ---
 title: Terraform과 IaC
-description: Terraform이 코드, state, 실제 자원을 어떻게 견주는지에서 출발해 plan과 자원 주소, 의존성 그래프와 교체 순서, state 잠금, 그리고 Terraform이 보지 못하는 서버 안쪽을 맡는 Packer와 Ansible까지 따라간다.
+description: Terraform이 코드, state, 실제 자원을 견주는 방식과 plan, 자원 주소, 의존성 그래프와 교체 순서, state 잠금, 그리고 Terraform이 보지 못하는 서버 안쪽을 맡는 Packer와 Ansible.
 date: 2026-11-06 12:00:00 +0900
 series: CI/CD와 IaC
 tags: [terraform, iac, packer, ansible]
@@ -56,7 +56,7 @@ state는 JSON 파일이다. 줄이면 이렇게 생겼다.
 - `attributes`: 마지막으로 읽은 속성 값의 캐시
 - `dependencies`: 이 자원이 참조한 자원. 코드에서 자원을 지운 뒤에도 지울 순서를 알려고 남긴다.
 
-Terraform은 원격 객체 하나가 자원 인스턴스 하나에만 묶인다고 가정한다. state를 잃으면 대응이 끊겨 이미 있는 web을 처음부터 새로 만들려 하고, 같은 VM을 두 state가 가리키면 한쪽의 apply가 다른 쪽에는 바깥 변경으로 보인다.
+Terraform은 클라우드의 자원 하나가 코드의 자원 하나에만 대응한다고 가정한다. state를 잃으면 대응이 끊겨 이미 있는 web을 처음부터 새로 만들려 하고, 같은 VM을 두 state가 가리키면 한쪽의 apply가 다른 쪽에는 바깥 변경으로 보인다.
 
 state에는 속성이 평문으로 들어간다. `sensitive = true`로 표시한 비밀 값도 화면에서만 가려지고 state에는 그대로 남으므로, state는 git이 아니라 접근을 제한한 원격 저장소에 둔다.
 
@@ -112,7 +112,7 @@ plan은 코드와 state를 주소로 짝지어 견준다. 주소가 같으면 �
 
 count에서는 b가 빠지면 c가 1번으로 당겨진다. state의 `user[1]`은 b인데 코드의 `user[1]`은 c가 되어 1번을 c로 바꾸고, 코드에 없는 2번을 지우는 plan이 나온다. for_each는 키로 짝지으니 `user["b"]`만 state에 남고 그것만 지운다. 두 모드 모두 코드에서 뺀 것은 하나인데, count는 순번이 곧 주소라서 b 뒤의 자원까지 plan에 끌려 들어온다.
 
-이미 count로 만든 자원은 `moved` 블록(Terraform 1.1부터)으로 주소만 옮긴다. state 안의 이름만 바뀌고 실제 자원은 지우지 않는다.
+이미 count로 만든 자원은 `moved` 블록으로 주소만 옮긴다. state 안의 이름만 바뀌고 실제 자원은 지우지 않는다.
 
 ```hcl
 moved {
@@ -180,7 +180,9 @@ resource "google_compute_instance" "web" {
   <figcaption>VM 교체의 두 순서 (시간은 대략값)</figcaption>
 </figure>
 
-기본 순서는 옛 VM을 지운 뒤 새 VM이 뜰 때까지 서비스가 끊기고, create_before_destroy는 새 VM이 먼저 떠 있어 끊기지 않는다. 그런데도 기본값이 아닌 이유는 두 자원이 잠시 함께 있어야 해서다. 이름이 겹치면 안 되는 자원이 많아서, `name = "web"`처럼 이름을 고정한 VM은 새 VM을 만드는 단계에서 실패한다. 이름에 접미사를 붙여 겹치지 않게 한 뒤에 켠다. 이 설정은 그 자원이 의존하는 자원에도 함께 적용된다.
+기본 순서는 옛 VM을 지운 뒤 새 VM이 뜰 때까지 서비스가 끊기고, create_before_destroy는 새 VM이 먼저 떠 있어 끊기지 않는다. 그런데도 기본값이 아닌 이유는 두 자원이 잠시 함께 있어야 해서다. 클라우드에는 이름이 겹치면 안 되는 자원이 많아서, `name = "web"`처럼 이름을 고정한 VM은 새 VM을 만드는 단계에서 실패한다.
+
+이름에 접미사를 붙여 겹치지 않게 한 뒤에 켠다. 이 설정은 그 자원이 의존하는 자원에도 함께 적용된다.
 
 교체를 막는 설정도 `lifecycle`에 있다.
 
@@ -199,14 +201,16 @@ VM이나 DB 줄에 `-/+`가 보이면 디스크와 IP가 바뀔 수 있으니 ap
   <figcaption>두 사람이 같은 state에 동시에 apply할 때 (시간은 대략값)</figcaption>
 </figure>
 
-잠금이 없으면 B가 VM a가 빠진 state를 써서, VM a는 클라우드에 있는데 state에서 사라진다. Terraform이 모르는 자원이 되어 다음 plan에도 나오지 않는다. 잠금이 있으면 B는 A가 끝날 때까지 기다렸다가 A가 쓴 state를 읽고 시작한다. 잠금이 B의 읽기를 A의 쓰기 뒤로 미루기 때문에, **B가 기다리는 25초**를 내주고 두 VM이 모두 state에 남는다.
+잠금이 없으면 B가 VM a가 빠진 state를 써서, VM a는 클라우드에 있는데 state에서 사라진다. Terraform이 모르는 자원이 되어 다음 plan에도 나오지 않는다.
+
+잠금이 있으면 B는 A가 끝날 때까지 기다렸다가 A가 쓴 state를 읽고 시작한다. B의 apply가 25초 늦어지는 대신 두 VM이 모두 state에 남는다.
 
 Terraform은 state를 쓸 수 있는 명령마다 자동으로 잠금을 건다. 잠금을 얻지 못하면 멈추는데, `-lock-timeout`의 기본값이 `0s`라 기다리지 않고 바로 실패한다. 그림처럼 기다리게 하려면 `-lock-timeout=5m`처럼 시간을 준다.
 
 잠금은 저장소가 제공하는 "없을 때만 만들기" 기능으로 구현한다. 두 사람이 동시에 시도해도 저장소가 한쪽만 성공시킨다.
 
 - gcs: state 옆에 `<워크스페이스>.tflock` 객체를 "존재하지 않을 때만" 조건으로 쓴다. 객체의 세대(generation) 번호가 잠금 ID다.
-- azurerm: state blob에 기한 없는 임대(lease)를 건다. 임대가 걸린 blob은 그 임대 ID 없이는 쓸 수 없다.
+- azurerm: state를 담은 blob(Azure Storage의 파일 객체)에 기한 없는 임대(lease)를 건다. 임대가 걸린 blob은 그 임대 ID 없이는 쓸 수 없다.
 - s3: `use_lockfile = true`면 `.tflock` 객체를 `If-None-Match: *` 조건으로 쓴다. 기본값은 false이고, 예전의 `dynamodb_table` 잠금은 폐기 예정이다.
 
 ```hcl
@@ -248,7 +252,7 @@ Packer는 기본 이미지로 임시 VM을 띄우고, 그 안에서 provisioner(
 
 ### Ansible 멱등성
 
-떠 있는 서버의 설정 한 줄을 바로 고쳐야 할 때는 Ansible을 쓴다. 제어 노드에서 SSH(Windows는 원격 관리 프로토콜인 WinRM)로 서버에 접속해 플레이북(playbook)의 작업을 차례로 실행하고, 서버에 에이전트를 깔지 않는다.
+떠 있는 서버의 설정 한 줄을 바로 고쳐야 할 때는 Ansible을 쓴다. Ansible을 실행하는 머신(제어 노드)에서 SSH(Windows는 원격 관리 프로토콜인 WinRM)로 서버에 접속해 플레이북(playbook)의 작업을 차례로 실행하고, 서버에 에이전트를 깔지 않는다.
 
 ```yaml
 - hosts: web
