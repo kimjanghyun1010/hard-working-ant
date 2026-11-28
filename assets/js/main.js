@@ -50,17 +50,24 @@
     setTimeout(() => { btn.textContent = '복사'; }, 1500);
   });
 
-  // Tables start folded; the summary lists the columns so readers know what is inside.
-  document.querySelectorAll('.prose > table').forEach((t) => {
-    const fold = document.createElement('details'), summary = document.createElement('summary'), info = document.createElement('span'), wrap = document.createElement('div');
-    fold.className = 'table-fold';
+  // Tables and the 참고 link list start folded; the summary says what is inside.
+  const fold = (el, label, detail) => {
+    const box = document.createElement('details'), summary = document.createElement('summary'), info = document.createElement('span'), wrap = document.createElement('div');
+    box.className = 'table-fold';
     wrap.className = 'table-wrap';
+    info.textContent = detail;
+    summary.append(label, info);
+    el.before(box);
+    wrap.append(el);
+    box.append(summary, wrap);
+  };
+  document.querySelectorAll('.prose > table').forEach((t) => {
     const cols = [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim()).filter(Boolean);
-    info.textContent = `${cols.join(', ')} (${t.querySelectorAll('tbody tr').length}행)`;
-    summary.append('표 보기', info);
-    t.before(fold);
-    wrap.append(t);
-    fold.append(summary, wrap);
+    fold(t, '표 보기', `${cols.join(', ')} (${t.querySelectorAll('tbody tr').length}행)`);
+  });
+  document.querySelectorAll('.prose > h2').forEach((h) => {
+    const list = h.nextElementSibling;
+    if (h.textContent.trim() === '참고' && list?.tagName === 'UL') fold(list, '참고 링크 보기', `${list.querySelectorAll('a').length}개`);
   });
 
   // Table of contents with scroll tracking.
