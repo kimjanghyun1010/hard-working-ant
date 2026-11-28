@@ -67,7 +67,7 @@ provider는 암호 방식과 키를 두는 자리로 나뉜다.
 
 키가 설정 파일에 있으면 etcd 백업 유출은 막아도, 컨트롤 플레인 호스트를 털리면 키도 함께 털린다. KMS provider는 봉투 암호화(envelope encryption)로 이 문제를 푼다. 데이터는 데이터 키(DEK)로 암호화하고, DEK는 KMS 안에만 있는 키 암호화 키(KEK)로 감싸서 감싼 DEK만 데이터 옆에 둔다.
 
-v2는 KEK가 바뀔 때만 바뀌는 시드(seed)에 난수를 섞어 쓰기마다 일회용 DEK를 만들어서, 쓰기마다 KMS를 부르던 v1보다 호출이 크게 준다. 같은 시드로 몇 번을 쓸지 통제할 수 없어서, 공식 문서는 KEK를 적어도 90일마다 바꾸라고 권한다.
+v2는 쓰기마다 KMS를 부르던 v1과 달리 DEK를 API 서버 안에서 만들어 KMS 호출을 줄인다. 공식 문서는 KEK를 적어도 90일마다 바꾸라고 권한다.
 
 모드를 바꿔 가며 백업 열어 보기를 눌러, 같은 Secret이 백업 파일에 어떤 모양으로 남는지 비교한다.
 
@@ -89,9 +89,9 @@ kubectl get secrets --all-namespaces -o json | kubectl replace -f -
 
 git에서 평문을 빼는 방법은 둘이다. 값을 암호문으로 바꿔 git에 두거나, git에는 "어느 저장소의 어느 값"이라는 참조만 두고 값은 git 밖 저장소에 둔다. 어느 쪽이든 평문은 어딘가에서 다시 생기고, 그 시점은 세 가지다.
 
-- 렌더링 때: Argo CD에서 git을 읽어 매니페스트를 만드는 repo-server가 값을 채운다. argocd-vault-plugin(AVP)
-- 컨트롤러가 받을 때: 클러스터 안에서 객체를 지켜보며 일하는 프로그램(컨트롤러)이 Secret을 만든다. Sealed Secrets, External Secrets Operator(ESO)
-- 파드가 시작할 때: kubelet이 볼륨을 붙이며 값을 가져온다. Secrets Store CSI Driver
+- 렌더링 때: Argo CD에서 git을 읽어 매니페스트를 만드는 repo-server에서 argocd-vault-plugin(AVP)이 값을 채운다.
+- 컨트롤러가 받을 때: 클러스터 안에서 객체를 지켜보며 일하는 프로그램(컨트롤러)인 Sealed Secrets나 External Secrets Operator(ESO)가 Secret을 만든다.
+- 파드가 시작할 때: kubelet이 볼륨을 붙이며 Secrets Store CSI Driver로 값을 가져온다.
 
 아래 그림처럼 평문이 늦게 생길수록 쥐는 곳이 준다.
 
@@ -101,7 +101,7 @@ git에서 평문을 빼는 방법은 둘이다. 값을 암호문으로 바꿔 gi
 
 ### Sealed Secrets
 
-Sealed Secrets는 누구나 잠글 수 있지만 개인키로만 여는 공개키 암호를 쓴다. 컨트롤러가 처음 뜰 때 4096비트 RSA 키 쌍을 만들고, 개발자는 공개키로 봉인한 SealedSecret만 git에 올린다. 값은 일회용 AES-256-GCM 세션 키로 암호화하고, 그 세션 키를 RSA-OAEP로 감싼다.
+Sealed Secrets는 누구나 잠글 수 있지만 개인키로만 여는 공개키 암호를 쓴다. 컨트롤러가 처음 뜰 때 4096비트 RSA 키 쌍을 만들고, 개발자는 공개키로 봉인한 SealedSecret만 git에 올린다.
 
 기본 범위(strict)에서는 이름과 네임스페이스가 암호문에 묶여, 다른 네임스페이스로 복사하면 풀리지 않는다. 컨트롤러는 30일마다 새 키를 만들고 옛 키를 지우지 않는다. 키 갱신은 비밀번호 교체가 아니라서, 값을 바꾸고 다시 봉인하는 일은 사람이 한다.
 
@@ -171,32 +171,15 @@ spec:
 
 Secrets Store CSI Driver는 Secret 객체를 거치지 않는다. CSI는 외부 스토리지를 파드 볼륨으로 붙이는 표준 인터페이스다. 파드가 시작할 때 kubelet이 CSI 볼륨을 붙이면, 드라이버가 저장소별 provider(Azure, AWS, GCP, Vault)에게 값을 받아 파드의 tmpfs 볼륨에 파일로 쓴다. `secretObjects`로 Secret도 만들 수 있는데, 볼륨을 붙인 파드가 있는 동안만 존재한다.
 
-AKS 애드온으로 쓸 때는 노드의 파드가 나눠 쓰는 관리 ID 대신 서비스 계정마다 나뉘는 워크로드 ID로 Key Vault에 접근하고, 읽기 전용 역할만 준다.
-
-## Vault 내부 구조
+## Vault 리스
 
 ASM과 Key Vault는 넣어 둔 값을 꺼내 주는 저장소다. 여러 서비스가 같은 DB 계정을 나눠 쓰고, 값이 새면 다음 교체 때까지 쓸 수 있다. HashiCorp Vault는 요청마다 수명이 붙은 계정을 만들어 이 시간을 줄이고, AVP, ESO, CSI provider가 모두 백엔드로 지원한다.
 
-### 봉인과 해제
-
-Vault는 데이터를 담는 스토리지 백엔드를 믿지 않는다. 데이터가 Vault를 떠날 때마다 배리어(barrier)가 256비트 AES-GCM으로 암호화해서, 백엔드에는 암호문만 있다. 키는 세 겹이다.
-
-- 암호화 키: 데이터를 암호화한다. 키링(keyring)에 들어 있다.
-- 루트 키(root key): 키링을 암호화한다. 백엔드에 다른 데이터와 함께 암호문으로 있다.
-- 봉인 해제 키(unseal key): 루트 키를 푼다. Vault 어디에도 저장하지 않는다.
-
-Vault는 시작할 때마다 봉인(sealed) 상태다. 백엔드는 읽을 수 있지만 루트 키를 풀 수 없어 어떤 값도 복호화하지 못한다. 기본 설정은 봉인 해제 키를 샤미르 비밀 분산(Shamir's Secret Sharing)으로 조각 5개로 나누고, 그중 3개가 모여야 키를 다시 맞춘다.
-
-```bash
-vault operator init               # 기본 -key-shares=5 -key-threshold=3
-vault operator unseal <조각>       # 서로 다른 조각으로 세 번 하면 Unsealed
-```
-
-조각을 나눠 들면 혼자 Vault를 열지 못하지만, 재시작마다 세 사람이 모여야 한다. 보통은 자동 해제(auto unseal)로 봉인 해제 키 보관을 클라우드 KMS나 HSM(키를 밖으로 꺼낼 수 없는 전용 장비)에 맡긴다. 이때 운영자가 받는 복구 키로는 루트 키를 풀 수 없어서, KMS에 닿지 못하면 Vault도 열리지 않는다.
+Vault 자신도 평문을 디스크에 두지 않는다. 데이터를 담는 스토리지 백엔드에는 암호문만 쓰고, 그 키를 푸는 봉인 해제 키(unseal key)는 어디에도 저장하지 않는다. 그래서 재시작하면 아무 값도 풀지 못하는 봉인(sealed) 상태로 뜨고, 보통 클라우드 KMS에 해제를 맡겨(auto unseal) KMS에 닿지 못하면 Vault도 열리지 않는다.
 
 ### 토큰과 리스
 
-Vault에 값을 묻는 쪽은 먼저 인증 방법(auth method)으로 로그인해 토큰을 받는다. 쿠버네티스 인증은 파드의 서비스 계정 JWT(쿠버네티스가 서명한 신원 토큰)를 받아 TokenReview API로 API 서버에 진짜인지 묻고, 역할에 묶인 서비스 계정과 네임스페이스면 정책(policy)이 붙은 토큰을 준다. 정책에 없는 경로는 모두 거부된다.
+Vault에 값을 묻는 쪽은 먼저 로그인해 토큰을 받는다. 쿠버네티스 인증은 파드의 서비스 계정 토큰이 진짜인지 API 서버에 묻고(TokenReview), 역할에 묶인 서비스 계정과 네임스페이스면 정책(policy)이 붙은 Vault 토큰을 준다. 정책에 없는 경로는 모두 거부된다.
 
 동적 시크릿과 service 토큰(기본 종류의 Vault 토큰)에는 리스(lease)가 붙는다. 리스는 유효 시간(TTL)과 갱신 가능 여부를 담고, 서버 설정의 기본 TTL과 최대 TTL은 둘 다 768시간(32일)이다. 리스가 끝나면 만료 관리자(expiration manager)가 비밀값을 폐기한다.
 
@@ -218,7 +201,7 @@ vault read database/creds/app     # 읽을 때마다 새 계정과 lease_id
   <figcaption>TTL 1시간 동적 계정의 리스 만료와 연장</figcaption>
 </figure>
 
-그래서 동적 시크릿은 갱신을 대신 해 주는 Vault Agent와 함께 쓴다. Agent Injector는 파드에 `vault.hashicorp.com/agent-inject: "true"` 어노테이션이 있으면, 파드 생성 요청을 가로채 고치는 웹훅으로 init 컨테이너(본 컨테이너보다 먼저 한 번 도는 컨테이너)와 사이드카를 끼워 넣는다. 값은 `/vault/secrets` 아래 공유 메모리 볼륨에 파일로 남는다. 사이드카는 리스를 다음 기준으로 관리한다.
+그래서 동적 시크릿은 갱신을 대신 해 주는 Vault Agent와 함께 쓴다. Agent Injector는 `vault.hashicorp.com/agent-inject: "true"` 어노테이션이 붙은 파드에 웹훅으로 Agent 사이드카를 끼워 넣고, Agent는 값을 `/vault/secrets` 아래 메모리 볼륨에 파일로 쓴다. 사이드카는 리스를 다음 기준으로 관리한다.
 
 - 갱신할 수 있는 리스: TTL의 2/3가 지나면 연장한다.
 - 갱신할 수 없는 리스: TTL의 90%에서 새 값을 받아 파일을 다시 쓴다.
@@ -278,10 +261,8 @@ CSI 볼륨은 드라이버가 저장소를 다시 읽어야 바뀐다. 교체 �
 - [Secrets Store CSI Driver — Concepts](https://secrets-store-csi-driver.sigs.k8s.io/concepts.html)
 - [Secrets Store CSI Driver — Secret Auto Rotation](https://secrets-store-csi-driver.sigs.k8s.io/topics/secret-auto-rotation.html)
 - [Microsoft Learn — CSI Driver configuration options](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-configuration-options)
-- [Microsoft Learn — CSI Driver identity access](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-identity-access)
 - [Vault — Seal/Unseal](https://developer.hashicorp.com/vault/docs/concepts/seal)
 - [Vault — Security model](https://developer.hashicorp.com/vault/docs/internals/security)
-- [Vault — operator init](https://developer.hashicorp.com/vault/docs/commands/operator/init)
 - [Vault — Lease](https://developer.hashicorp.com/vault/docs/concepts/lease)
 - [Vault — Server configuration](https://developer.hashicorp.com/vault/docs/configuration)
 - [Vault — Kubernetes auth method](https://developer.hashicorp.com/vault/docs/auth/kubernetes)

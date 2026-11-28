@@ -51,7 +51,7 @@ az network nic show-effective-route-table -g <리소스 그룹> -n <NIC 이름> 
 
 ## VNet 피어링
 
-VNet 피어링(peering)은 두 VNet을 연결 면에서 하나처럼 만든다. 피어링을 맺으면 양쪽 모든 서브넷에 상대 VNet의 주소 범위마다 다음 홉 `VNet 피어링` 줄이 생기고, 패킷은 게이트웨이 없이 Microsoft 백본(데이터센터 사이에 깐 자체 회선)으로 바로 간다. 같은 리전이면 지연은 같은 VNet 안과 같고, 대역폭은 VM 크기의 한도만 받으며, 따로 암호화하지 않는다.
+VNet 피어링(peering)은 두 VNet의 VM이 사설 IP로 서로 닿게 한다. 피어링을 맺으면 양쪽 모든 서브넷에 상대 VNet의 주소 범위마다 다음 홉 `VNet 피어링` 줄이 생기고, 패킷은 게이트웨이 없이 Microsoft 백본(데이터센터 사이에 깐 자체 회선)으로 바로 간다. 같은 리전이면 지연은 같은 VNet 안과 같고, 대역폭은 VM 크기의 한도만 받으며, 따로 암호화하지 않는다.
 
 피어링은 링크 두 개다. A에서 B로, B에서 A로 하나씩 만들고, 하나만 있으면 Initiated, 둘 다 있으면 Connected다. 아래 그림처럼 두 링크가 Connected가 되는 순간 양쪽 테이블에 줄이 생긴다.
 
@@ -71,11 +71,11 @@ A에서 C로 가려면 허브 B에 NVA(Network Virtual Appliance, 보통 방화�
   <figcaption>A-B, B-C 피어링에서 A에서 C로 가는 길</figcaption>
 </figure>
 
-피어링만 있으면 A에서 `10.3.0.0/16`으로 가는 패킷이 `10.0.0.0/8` 다음 홉 없음 줄에 걸려 버려진다. NVA 모드에서는 A 서브넷에 넣은 `10.3.0.0/16 → NVA` UDR이 `/8`보다 길어서 이기고, 패킷은 B의 NVA에 닿은 뒤 **B의 피어링 줄을 따라** C로 다시 나간다. 피어링이 전이되지 않는 것은 그대로이고, NVA가 패킷을 한 번 받아 다시 보내 그 빈자리를 메운다. 이 길에는 설정이 세 가지 더 필요하다.
+피어링만 있으면 A에서 `10.3.0.0/16`으로 가는 패킷이 `10.0.0.0/8` 다음 홉 없음 줄에 걸려 버려진다. NVA 모드에서는 A 서브넷에 넣은 `10.3.0.0/16 → NVA` UDR이 `/8`보다 길어서 이기고, 패킷은 B의 NVA에 닿은 뒤 **B의 피어링 줄을 따라** C로 다시 나간다. 이 길에는 설정이 세 가지 더 필요하다.
 
 - NVA NIC에서 IP 전달(IP forwarding)을 켠다. 꺼져 있으면 Azure가 NVA 자기 주소가 아닌 패킷을 버린다.
 - A와 C 쪽 피어링 링크에서 `전달된 트래픽 수신 허용`을 켠다.
-- NVA는 UDR을 거는 서브넷과 다른 서브넷에 둔다. 같은 서브넷이면 패킷이 서브넷을 빠져나가지 못하는 루프가 생긴다.
+- NVA가 있는 서브넷에는 다음 홉이 NVA인 UDR을 걸지 않는다. NVA가 내보낸 패킷이 다시 NVA로 돌아오는 루프가 생긴다.
 
 ## IPsec 터널
 
@@ -98,7 +98,13 @@ ICV (HMAC-SHA-256-128)           16
 합계                             62~77바이트
 ```
 
-NAT(network address translation)는 사설 주소를 공인 주소로 바꿔 내보내는 기능으로, 포트 번호로 연결을 구분한다. ESP에는 포트가 없어서 사무실이 NAT 뒤에 있으면 UDP 4500으로 한 번 더 감싸고(NAT-T) 8바이트가 더 붙는다. 이더넷이 한 번에 싣는 패킷 최대 크기(MTU) 1,500바이트에서 이만큼 빠지면 안쪽 TCP가 한 패킷에 실을 수 있는 데이터(MSS)는 약 1,375바이트다.
+NAT(network address translation)는 사설 주소를 공인 주소로 바꿔 내보내는 기능으로, 포트 번호로 연결을 구분한다. ESP에는 포트가 없어서 사무실이 NAT 뒤에 있으면 UDP 4500으로 한 번 더 감싸고(NAT-T) 8바이트가 더 붙는다.
+
+안쪽 TCP가 한 패킷에 싣는 데이터(MSS)는 이더넷 패킷 최대 크기(MTU) 1,500바이트에서 이만큼과 안쪽 IP, TCP 헤더를 뺀 값이다.
+
+```text
+1,500 - ESP 77 - NAT-T 8 - 안쪽 IP 20 - TCP 20 = MSS 1,375바이트
+```
 
 이보다 큰 패킷은 조각나거나, 조각내지 말라는 IP 헤더 표시인 DF(Don't Fragment) 비트가 켜져 있으면 버려진다. 버린 라우터는 크기를 줄이라는 ICMP(라우터가 오류를 알리는 제어 메시지)를 돌려보내는데, 이 메시지가 중간 방화벽에서 막히면 SSH는 붙는데 큰 파일 전송이나 TLS 핸드셰이크만 멈춘다. Azure VPN 게이트웨이는 TCP MSS를 양방향으로 1,360바이트(IPv4, 인터넷 경유)로 줄여 이를 막고, FortiGate는 터널 정책의 `tcp-mss-sender`, `tcp-mss-receiver`로 같은 일을 한다.
 
@@ -107,7 +113,7 @@ NAT(network address translation)는 사설 주소를 공인 주소로 바꿔 내
 1. IKE_SA_INIT: 암호화, 무결성, DH 그룹 제안을 주고받고 DH로 공유 키를 만든다. DH(Diffie-Hellman)는 엿보이는 길 위에서도 둘만 아는 키를 계산해 내는 방법이고, 그룹 번호가 클수록 키가 길다. 이 키로 이후 IKE 메시지를 보호하는 IKE SA가 생긴다.
 2. IKE_AUTH: 사전 공유 키(PSK)로 앞의 메시지와 서로의 식별자를 인증하고, 데이터를 암호화할 첫 Child SA(IPsec SA)를 함께 만든다.
 
-장비 설정에서 부르는 1단계는 IKE_SA_INIT와 IKE_AUTH의 인증까지이고, 2단계는 Child SA다. 그래서 FortiGate는 사전 공유 키를 `phase1-interface`에 둔다.
+FortiGate 같은 장비는 IKE SA를 맺는 부분(IKE_SA_INIT와 IKE_AUTH의 인증)을 phase1로, IKE_AUTH에 함께 실린 Child SA를 phase2로 나눠 설정한다. 사전 공유 키는 인증에 쓰므로 `phase1-interface`에 들어간다.
 
 아래 그림처럼 양쪽 제안이 하나도 겹치지 않으면 첫 응답이 `NO_PROPOSAL_CHOSEN`으로 끝난다. IKE_AUTH에서 멈추면 사전 공유 키나 식별자가 다르다.
 
@@ -115,7 +121,7 @@ NAT(network address translation)는 사설 주소를 공인 주소로 바꿔 내
   <figcaption>IKEv2 메시지 네 개와 제안 불일치</figcaption>
 </figure>
 
-Azure 기본 정책은 호환성 위주라 1단계 DH가 Group 2(1,024비트)이고, SA 수명은 IKE 28,800초, IPsec 27,000초다. IKEv2 알고리즘 권고인 RFC 8247은 Group 2를 쓰지 말라고(SHOULD NOT) 하고 Group 14(2,048비트)를 필수(MUST)로 둔다. Azure 연결에 사용자 지정 정책(AES256, SHA256, DHGroup14, PFS2048)을 넣고 FortiGate에 같은 조합을 넣는다. PFS(perfect forward secrecy)는 Child SA 키를 갱신할 때마다 DH를 새로 해서, 키 하나가 새어도 다른 기간의 데이터는 풀리지 않게 한다.
+Azure 기본 정책은 호환성 위주라 phase1 DH가 Group 2(1,024비트)이고, SA 수명은 IKE 28,800초, IPsec 27,000초다. IKEv2 알고리즘 권고인 RFC 8247은 Group 2를 쓰지 말라고(SHOULD NOT) 하고 Group 14(2,048비트)를 필수(MUST)로 둔다. Azure 연결에 사용자 지정 정책(AES256, SHA256, DHGroup14, PFS2048)을 넣고 FortiGate에 같은 조합을 넣는다. PFS(perfect forward secrecy)는 Child SA 키를 갱신할 때마다 DH를 새로 해서, 키 하나가 새어도 다른 기간의 데이터는 풀리지 않게 한다.
 
 ```text
 config vpn ipsec phase1-interface
@@ -214,7 +220,7 @@ Azure가 사무실에 광고하는 것은 VNet 대역, 연결된 로컬 네트�
 
 ### 대역 겹침
 
-경로를 주고받는 방식은 대역이 겹치지 않는다는 전제 위에 있다. Azure는 VNet 대역과 똑같은 BGP 경로를 거부하고, 앞에서 본 예외대로 VNet 자기 대역 시스템 경로는 BGP 경로가 더 길어도 이긴다. 아래 데모는 모드를 바꿔 VNet이 사무실과 같은 `10.0.0.0/16`일 때와 `10.1.0.0/16`일 때를 비교한다.
+경로를 주고받는 방식은 대역이 겹치지 않는다는 전제 위에 있다. Azure는 VNet 대역과 똑같은 BGP 경로를 거부하고, 더 긴 BGP 경로도 앞의 예외대로 VNet 자기 대역에 진다. 아래 데모는 모드를 바꿔 VNet이 사무실과 같은 `10.0.0.0/16`일 때와 `10.1.0.0/16`일 때를 비교한다.
 
 <figure class="fig" data-figure="private-network-overlap">
   <figcaption>VNet과 사무실 대역이 겹칠 때 VM이 보낸 패킷</figcaption>

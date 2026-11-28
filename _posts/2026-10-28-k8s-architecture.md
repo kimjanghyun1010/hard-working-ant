@@ -20,7 +20,17 @@ scripts: [figures/k8s-architecture.js]
 
 etcd에 읽고 쓰는 것은 API 서버 하나뿐이다. 스케줄러, 컨트롤러, kubelet은 서로를 부르지 않고 **한곳에 적힌 상태를 각자 보고 움직인다.** API 서버에서 바뀐 것을 받아 보고, 할 일을 하면 결과를 다시 API 서버에 적는다.
 
-아래 그림처럼 replicas 1인 Deployment가 파드로 뜨기까지 API 서버를 일곱 번 오가는 동안 컨테이너를 실제로 띄우는 단계는 6번 하나다.
+replicas 1인 Deployment가 파드로 뜨기까지는 아래 그림처럼 일곱 단계를 거친다.
+
+1. kubectl이 Deployment를 API 서버에 보낸다.
+2. API 서버가 검사한 뒤 etcd에 저장한다.
+3. 컨트롤러가 ReplicaSet과 파드를 만든다. 파드의 노드 칸(`nodeName`)은 비어 있다.
+4. 스케줄러가 노드를 골라 파드의 `nodeName`에 적는다.
+5. 그 노드의 kubelet이 자기 파드를 받는다.
+6. 런타임이 이미지를 받고 컨테이너를 띄운다.
+7. kubelet이 파드 상태를 API 서버에 보고한다.
+
+컨테이너를 실제로 띄우는 단계는 6번 하나이고, 나머지는 API 서버에 적고 읽는 일이다.
 
 <figure class="fig" data-figure="k8s-architecture-flow">
   <figcaption>kubectl apply 한 번이 파드 Running이 되기까지</figcaption>
@@ -46,7 +56,7 @@ Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json
 
 `limit=500`은 목록을 500개씩 나눠 받는 `--chunk-size`의 기본값이다. 읽기는 어드미션을 건너뛴다.
 
-API 서버는 etcd 내용을 메모리에 복사해 둔 감시 캐시(watch cache)를 갖고 있다. 1.31부터 나누지 않는 목록을, 1.34부터는 이렇게 나눠 받는 목록까지 etcd에 가지 않고 이 캐시에서 답한다. 캐시가 최신인지만 etcd에 확인한다.
+API 서버는 etcd 내용을 메모리에 복사해 둔 감시 캐시(watch cache)로 목록과 감시 요청 대부분에 답하고, 캐시가 최신인지만 etcd에 확인한다.
 
 etcd에 저장된 객체에는 `resourceVersion`이 붙는다. etcd가 쓰기마다 하나씩 올리는 리비전 번호다. 두 클라이언트가 같은 객체를 동시에 고치면 먼저 쓴 쪽만 성공하고, 낡은 resourceVersion을 들고 온 쪽은 409 Conflict를 받아 다시 읽고 고친다. 잠금 없이 충돌을 막는 이 방식을 낙관적 동시성(optimistic concurrency)이라고 한다.
 
@@ -88,7 +98,7 @@ etcd는 고칠 때마다 이전 리비전을 남긴다. 이 기록이 끝없이 
 2. watch: 그 버전부터 감시하며 캐시를 고친다.
 3. 다시 list: 요청한 버전의 기록이 이미 없으면 API 서버가 410 Gone을 돌려준다. 캐시를 비우고 1번부터 다시 한다.
 
-감시는 etcd가 아니라 API 서버의 감시 캐시에서 받는다. 이 캐시는 종류마다 정해진 크기(`--watch-cache-sizes`)의 버퍼에 최근 이벤트만 담아서, 변경이 잦으면 etcd에 남은 기록보다 먼저 옛 이벤트가 밀려나고 410 Gone이 온다. 공식 문서는 기록 창이 짧은 데 대비해 `allowWatchBookmarks=true`로 BOOKMARK 이벤트를 받아 resourceVersion을 앞당겨 두라고 한다.
+감시는 etcd가 아니라 API 서버의 감시 캐시에서 받는다. 이 캐시는 종류마다 최근 이벤트만 정해진 크기로 담아서, 변경이 잦으면 etcd에 남은 기록보다 먼저 옛 이벤트가 밀려나고 410 Gone이 온다.
 
 컨트롤러는 인포머의 캐시를 읽고 판단해서 API 서버에 매번 묻지 않는다. 컨트롤러 매니저(kube-controller-manager)는 Deployment, ReplicaSet, Node, Job 같은 여러 컨트롤러를 한 프로세스에 묶어 돌린다.
 
@@ -102,11 +112,11 @@ etcd는 고칠 때마다 이전 리비전을 남긴다. 이 기록이 끝없이 
 
 컨트롤러는 "파드가 지워졌다"는 이벤트 하나에 반응하지 않는다. 볼 때마다 "원하는 3, 실제 2" 같은 차이를 메울 뿐이라, 이벤트를 놓쳐도 다음 비교에서 따라잡고 같은 일을 두 번 해도 결과가 같다. 공식 문서가 파드 하나만 띄울 때조차 Deployment나 Job으로 만들라고 권하는 이유다.
 
-컨트롤러 매니저를 여러 대 띄워도 루프를 도는 것은 한 대다. 둘이 함께 돌면 같은 차이를 두 번 메워 파드가 넘칠 수 있다. 인스턴스마다 `kube-system`의 Lease 객체(지금 리더가 누구인지 적어 두는 작은 객체)를 잡으려 하고, 리더가 10초 안에 갱신하지 못하면 15초 뒤 다른 인스턴스가 이어받는다. 스케줄러도 같다.
+컨트롤러 매니저를 여러 대 띄워도 루프를 도는 것은 한 대다. 둘이 함께 돌면 같은 차이를 두 번 메워 파드가 넘칠 수 있다. 인스턴스마다 `kube-system`의 Lease 객체(지금 리더가 누구인지 적어 두는 작은 객체)를 잡으려 하고, 리더는 10초 안에 갱신하지 못하면 스스로 물러나고, 다른 인스턴스는 마지막 갱신에서 15초가 지나면 Lease를 가져간다. 스케줄러도 같다.
 
 ```text
 --leader-elect-renew-deadline=10s   리더가 갱신을 포기하는 시한
---leader-elect-lease-duration=15s   다른 인스턴스가 기다리는 시간
+--leader-elect-lease-duration=15s   다른 인스턴스가 마지막 갱신부터 기다리는 시간
 ```
 
 파드를 조금씩 새 버전으로 바꾸는 롤링 업데이트도 이 루프로 돈다. 이미지를 바꾸면 Deployment 컨트롤러가 새 ReplicaSet을 만들고, 기본값 maxSurge 25%와 maxUnavailable 25%를 넘지 않게 새 쪽의 replicas를 늘리고 옛 쪽을 줄인다. replicas 4면 최대 5개까지 띄우고 최소 3개를 유지한다.
@@ -122,8 +132,6 @@ etcd는 고칠 때마다 이전 리비전을 남긴다. 이 기록이 끝없이 
 <figure class="fig" data-figure="k8s-architecture-filter">
   <figcaption>거르기, 점수, 바인딩 순서로 노드를 고르는 과정</figcaption>
 </figure>
-
-노드가 수천 대면 스케줄러는 조건에 맞는 노드를 일정 비율만큼 찾으면 거르기를 멈추고 그 안에서 점수를 매긴다. 이 비율(`percentageOfNodesToScore`)은 따로 정하지 않으면 100대에서 50%, 5000대에서 10%로 줄고 5% 아래로는 내려가지 않는다. 조건에 맞는 노드가 100대가 안 되면 전부 본다.
 
 거르기에서 재는 자리는 실제 사용량이 아니라 **request 합계**다. 노드의 남은 자리는 할당 가능량(allocatable)에서 이미 올라간 파드들의 request 합을 뺀 값이다. 아래 데모에서 새 파드의 request를 500m(밀리코어, 0.5코어)과 2000m(2코어)으로 바꿔 가며 파드 만들기를 눌러 결과를 비교한다.
 
@@ -227,7 +235,6 @@ spec:
 - [Kubernetes — kube-scheduler 명령줄 옵션](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-scheduler/)
 - [Kubernetes — Kubernetes Scheduler](https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/)
 - [Kubernetes — Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
-- [Kubernetes — Scheduler Performance Tuning](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduler-perf-tuning/)
 - [Kubernetes — Pod Priority and Preemption](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/)
 - [Kubernetes — Container Runtime Interface](https://kubernetes.io/docs/concepts/architecture/cri/)
 - [cri-api — api.proto](https://github.com/kubernetes/cri-api/blob/master/pkg/apis/runtime/v1/api.proto)

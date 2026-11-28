@@ -66,12 +66,12 @@ WSGI 서버가 이 방식으로 동시성을 얻는다. WSGI는 Python 웹 서�
 
 ## asyncio 이벤트 루프
 
-asyncio는 기다림을 스레드 여러 개가 아니라 스레드 하나 안의 코루틴으로 겹친다. 코루틴은 `async def`로 만든 함수이고, `await`에서 멈춰 차례를 이벤트 루프에 넘긴다. 루프는 소켓들을 커널에 맡겨 두고 준비된 것만 깨운다. 리눅스에서는 `selectors.DefaultSelector`가 epoll(소켓 여러 개 중 데이터가 온 것만 골라 알려 주는 커널 기능)을 고른다(macOS와 BSD는 kqueue).
+asyncio는 기다림을 스레드 여러 개가 아니라 스레드 하나 안의 코루틴으로 겹친다. 코루틴은 `async def`로 만든 함수이고, `await`에서 멈춰 차례를 이벤트 루프에 넘긴다. 루프는 소켓들을 커널에 맡겨 두고 준비된 것만 깨운다.
 
 루프가 한 바퀴 도는 순서는 `asyncio/base_events.py`의 `_run_once`에 있다.
 
 1. 예약된 타이머 중 가장 이른 것까지 남은 시간을 대기 상한(timeout)으로 잡는다. 바로 돌릴 콜백이 있으면 0이다.
-2. `selector.select(timeout)`으로 소켓이 준비되기를 기다린다. epoll에서는 `epoll_wait` 시스템 콜이다.
+2. `selector.select(timeout)`으로 소켓이 준비되기를 기다린다. 리눅스의 `selectors.DefaultSelector`는 epoll(소켓 여러 개 중 데이터가 온 것만 골라 알려 주는 커널 기능)이고, `epoll_wait` 시스템 콜을 부른다.
 3. 준비된 소켓과 시간이 된 타이머의 콜백(그때 부르라고 맡겨 둔 함수)을 ready 큐에 넣는다.
 4. ready 큐의 콜백을 하나씩 차례로 실행한다. 코루틴은 다음 `await`까지 돈다.
 
@@ -102,19 +102,19 @@ asyncio는 병렬이 아니라 **한 스레드가 여러 대기를 겹치는 동
 
 4단계의 콜백은 하나씩 차례로 돌고, 도는 동안 루프는 2단계로 돌아가지 못한다. `async def` 안에서 `time.sleep`, `requests.get`, 동기 DB 드라이버처럼 await 없이 기다리는 함수를 부르면 그동안 다른 요청은 전부 멈춘다.
 
-아래 데모에서 모드를 바꿔 요청 A를 보내면, 10ms에 도착한 요청 B가 얼마나 밀리는지 견줄 수 있다.
+아래 데모에서 모드를 바꿔 요청 A를 보내면, A가 DB를 200ms 기다리는 동안 10ms에 도착한 요청 B가 얼마나 밀리는지 견줄 수 있다.
 
 <figure class="fig" data-figure="python-concurrency-blocking">
   <figcaption>async def 안의 동기 호출이 이벤트 루프를 막는 모습</figcaption>
 </figure>
 
-동기 호출이면 B는 194ms를 기다리고, await이면 바로 처리된다. await은 DB 응답을 기다리는 동안 루프를 2단계 select로 돌려보내 B를 받게 하지만, 동기 호출은 응답이 올 때까지 루프 스레드를 쥐고 놓지 않는다. Node.js는 I/O API가 대부분 비동기라 루프를 막는 쪽이 주로 긴 계산이지만, Python은 동기 라이브러리가 많아서 **기다림**이 루프를 막는 경우가 흔하다.
+동기 호출이면 B는 A의 호출이 끝나는 204ms까지 194ms를 기다리고, await이면 바로 처리된다. await은 DB 응답을 기다리는 동안 루프를 2단계 select로 돌려보내 B를 받게 하지만, 동기 호출은 응답이 올 때까지 루프 스레드를 쥐고 놓지 않는다. Node.js는 I/O API가 대부분 비동기라 루프를 막는 쪽이 주로 긴 계산이지만, Python은 동기 라이브러리가 많아서 **기다림**이 루프를 막는 경우가 흔하다.
 
 고치는 방법은 기다리는 함수의 종류에 따라 다르다.
 
 - 비동기 라이브러리로 바꾼다: `requests` 대신 `httpx.AsyncClient`, 동기 DB 드라이버 대신 asyncpg나 SQLAlchemy의 async 엔진.
 - 바꿀 수 없으면 `await asyncio.to_thread(func)`로 루프의 기본 스레드 풀에 넘긴다. 기다리는 동안 GIL을 놓으므로 I/O에는 효과가 있다.
-- CPU 계산이면 `loop.run_in_executor(ProcessPoolExecutor(), func)`로 프로세스에 넘긴다. to_thread는 GIL 때문에 계산에는 도움이 안 된다.
+- CPU 계산이면 시작할 때 `ProcessPoolExecutor`를 하나 만들어 두고 `loop.run_in_executor(pool, func)`로 프로세스에 넘긴다. to_thread는 GIL 때문에 계산에는 도움이 안 된다.
 
 막히는 곳은 디버그 모드로 찾는다. `PYTHONASYNCIODEBUG=1`로 켜면 콜백 하나가 `slow_callback_duration`(기본 0.1초)보다 오래 루프를 잡을 때 경고가 남는다.
 

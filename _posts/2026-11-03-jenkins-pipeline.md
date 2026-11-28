@@ -11,8 +11,8 @@ scripts: [figures/jenkins-pipeline.js]
 
 Jenkinsfile의 코드 한 줄은 컨트롤러와 에이전트 중 어디서, 어떤 권한으로 돌까? Jenkins는 일을 두 자리로 나눈다.
 
-- 컨트롤러(controller): webhook(push가 생기면 Git 서버가 보내는 HTTP 요청)을 받아 빌드를 큐에 넣고, Jenkinsfile을 해석해 순서를 정하고, 로그와 결과를 기록한다. 예전 문서의 master다.
-- 에이전트(agent): 실제 명령을 실행한다. 예전 문서의 slave다.
+- 컨트롤러(controller): webhook(push가 생기면 Git 서버가 보내는 HTTP 요청)을 받아 빌드를 큐에 넣고, Jenkinsfile을 해석해 순서를 정하고, 로그와 결과를 기록한다.
+- 에이전트(agent): 실제 명령을 실행한다.
 
 아래 그림처럼 커밋 하나가 배포되는 동안 컨트롤러는 순서만 정하고, 빌드와 이미지 push와 배포는 에이전트 파드 안에서 돈다.
 
@@ -118,7 +118,9 @@ Warning: A secret was passed to "sh" using Groovy String interpolation, which is
          Affected argument(s) used the following variable(s): [TOKEN]
 ```
 
-사용자가 넣은 빌드 파라미터를 큰따옴표로 끼우는 것도 같은 문제다. 값에 `; rm -rf ~`가 들어 있으면 에이전트의 셸이 그대로 실행한다. 로그의 `****` 가림도 `withCredentials` 블록 안에서만 동작하므로, 값을 확인할 때는 길이나 해시만 찍는다.
+사용자가 넣은 빌드 파라미터를 큰따옴표로 끼우는 것도 같은 문제다. 값에 `; rm -rf ~`가 들어 있으면 에이전트의 셸이 그대로 실행한다.
+
+로그의 `****` 가림은 `withCredentials` 블록 안에서만 동작해, 블록 밖으로 꺼낸 값을 찍으면 로그에 그대로 남는다.
 
 ## 파드 에이전트
 
@@ -144,13 +146,13 @@ kaniko는 데몬 없이 컨테이너 안에서 이미지를 만든다.
 - Dockerfile 명령을 하나씩 직접 실행하고, 명령마다 바뀐 파일을 사용자 공간에서 스냅샷으로 떠 레이어를 만든다.
 - 다 만든 이미지를 레지스트리로 바로 push한다. 인증은 `/kaniko/.docker/config.json`에서 읽는다.
 
-자기 컨테이너의 루트를 빌드 대상으로 쓰므로, kaniko는 빌드 중에 `/kaniko`와 마운트된 경로를 뺀 나머지를 지우고 덮어쓴다. 파드에서는 workspace가 마운트된 볼륨이라 안전하다. 아래 그림의 셋째 장면처럼 에이전트와 kaniko가 한 컨테이너에서 돌 때 일이 생긴다.
+자기 컨테이너의 루트를 빌드 대상으로 쓰므로, kaniko는 빌드 중에 `/kaniko`와 마운트된 경로를 뺀 나머지를 지우고 덮어쓴다. 파드에서는 workspace가 마운트된 볼륨이라 안전하다. 사이드카를 붙일 수 없는 ECS Fargate 에이전트(amazon-ecs-plugin 이슈 #331)에서는 에이전트와 kaniko가 한 컨테이너에서 돌아, 아래 그림의 마지막 장면처럼 workspace까지 지워진다.
 
 <figure class="fig" data-figure="jenkins-pipeline-kaniko">
   <figcaption>docker build, kaniko, 한 컨테이너에서 도는 kaniko</figcaption>
 </figure>
 
-Jenkins amazon-ecs-plugin의 Fargate 에이전트는 사이드카를 붙일 수 없어(이슈 #331) 에이전트와 kaniko가 한 컨테이너에서 돈다. 여기서는 workspace가 마운트가 아니라서, `FROM`이 여럿인 멀티스테이지 빌드의 다음 `FROM`에서 함께 지워진다. 그래서 `--ignore-path=/home/jenkins`로 뺀다.
+이때 workspace는 마운트가 아니라서 `FROM`이 여럿인 멀티스테이지 빌드의 다음 `FROM`에서 지워진다. `--ignore-path=/home/jenkins`로 workspace를 지울 대상에서 뺀다.
 
 kaniko 원 저장소는 2025년 6월 3일에 아카이브됐고, 지금은 Chainguard 포크와 커뮤니티 포크(osscontainertools/kaniko)가 이어 간다.
 
@@ -189,7 +191,7 @@ def call(String image) {
 
 Jenkins 헬름 차트의 기본 권한 설정은 `loggedInUsersCanDoAnything`이다. 로그인만 하면 운영 배포 Job도 빌드하고 고칠 수 있다. 역할 단위 권한은 Role-based Authorization Strategy 플러그인으로 준다.
 
-- 전역 역할: `Overall/Administer`, `Overall/Read`처럼 Jenkins 전체에 걸린다. 항목 역할에 무엇을 적든 전역 역할이 우선한다.
+- 전역 역할: `Overall/Administer`, `Overall/Read`처럼 Jenkins 전체에 걸린다. 권한은 더해지기만 해서, 전역 역할에 준 권한은 모든 Job에 걸리고 항목 역할로 좁힐 수 없다.
 - 항목 역할: 정규식 패턴에 맞는 Job과 폴더에만 걸린다. 패턴은 폴더 경로까지 포함한 전체 이름에 맞추고, 대소문자를 가린다.
 
 역할을 받을 그룹은 회사 계정 디렉터리인 LDAP나 AD 같은 인증(security realm)에서 온다. Jenkins 자체 사용자 DB에는 그룹 기능이 없고, 로그인한 모든 사용자가 든 `authenticated`만 있다.

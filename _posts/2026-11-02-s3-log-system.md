@@ -13,7 +13,7 @@ scripts: [figures/s3-log-system.js]
 
 Elasticsearch는 로그 한 줄을 받으면 세 가지를 디스크에 쓴다.
 
-- 원문(`_source`): 받은 JSON 그대로다. 기본 코덱은 LZ4로 압축하고, `index.codec: best_compression`이면 ZSTD로 더 줄이는 대신 읽기가 느려진다.
+- 원문(`_source`): 받은 JSON 그대로다.
 - 역색인(inverted index): 단어마다 그 단어가 든 문서 번호를 적은 목록이다. 아무 단어로나 바로 찾게 해 준다.
 - doc values: 필드 값을 열 단위로 모은 것이다. 집계와 정렬에 쓴다.
 
@@ -30,7 +30,7 @@ Elasticsearch의 디스크는 늘 켜 둔 노드에 붙어 있어서, 보관 기
 
 가격은 us-east-1 공개 가격표(2026년 11월 기준)다.
 
-그래서 검색 엔진에는 바로 검색해야 하는 며칠치만 두고 ILM(Index Lifecycle Management)으로 지운다. ILM은 인덱스 나이에 따라 hot, warm, cold, frozen, delete 단계를 옮기는 정책이다. `min_age`는 인덱스를 만든 시각부터 잰다. 인덱스가 일정 크기나 나이에 이르면 새 인덱스로 넘겨 쓰는 롤오버를 쓰면 롤오버된 시각부터 잰다.
+그래서 검색 엔진에는 바로 검색해야 하는 며칠치만 두고 ILM(Index Lifecycle Management)으로 지운다. ILM은 인덱스 나이에 따라 hot, warm, cold, frozen, delete 단계를 옮기는 정책이고, `min_age`는 인덱스를 만든 시각부터 잰다.
 
 ```json
 PUT _ilm/policy/delete-5d
@@ -43,19 +43,11 @@ PUT _index_template/logs
   "template": { "settings": { "index.lifecycle.name": "delete-5d" } } }
 ```
 
-- 템플릿은 새로 만드는 인덱스에만 붙는다. 이미 있는 인덱스는 `PUT app-logs-*/_settings`로 `index.lifecycle.name`을 따로 넣는다.
-- ILM은 `indices.lifecycle.poll_interval`(기본 10분)마다 조건을 검사한다. 5일이 되는 순간이 아니라 그 뒤 첫 검사에서 지운다.
+템플릿은 새로 만드는 인덱스에만 붙는다. 이미 있는 인덱스는 `PUT app-logs-*/_settings`로 `index.lifecycle.name`을 따로 넣는다.
 
 ## S3 원본 로그
 
-S3로 보낸 로그는 소스마다 경로와 포맷이 다르다. Fluentd와 Datadog 아카이브는 Hive 스타일, 곧 `key=value` 꼴의 폴더 이름(`dt=20261102/hour=14/`)으로 떨어지고, CloudFront와 WAF는 AWS가 정한 `YYYY/MM/DD/HH/` 형식으로 떨어진다.
-
-| 소스 | 경로 | 포맷 | 파티션 |
-|---|---|---|---|
-| Fluentd | `fluentd/{env}/{service}/` | JSON.gz | `dt=YYYYMMDD/hour=HH/` |
-| Datadog 아카이브 | `datadog/{env}/{service}/` | JSON.zst | `dt=YYYYMMDD/hour=HH/` |
-| CloudFront 표준 로그(v2) | `cloudfront-{service}-{env}/` | Parquet | `YYYY/MM/DD/HH/` |
-| WAF | `AWSLogs/{acct}/WAFLogs/{region}/{acl}/` | .log.gz | `YYYY/MM/DD/HH/mm/` |
+S3로 보낸 로그는 소스마다 경로와 포맷이 다르다. Fluentd와 Datadog 아카이브는 압축한 JSON을 Hive 스타일, 곧 `key=value` 꼴의 폴더 이름(`dt=20261102/hour=14/`)으로 떨어뜨리고, CloudFront와 WAF는 AWS가 정한 `YYYY/MM/DD/HH/` 형식으로 떨어뜨린다.
 
 버킷은 하나만 두고 입력(소스별 프리픽스), 상태(`bookmarks/`), 출력(`iceberg/`)을 프리픽스로 나눈다. 권한과 수명 주기 규칙(객체 나이에 따라 저장 등급을 바꾸거나 지우는 규칙)이 프리픽스 단위로 걸리기 때문이다. 수명 주기는 입력에만 걸어, 30일 뒤 꺼낼 때 시간이 걸리는 대신 싼 Glacier 등급으로 내린다.
 
@@ -90,15 +82,15 @@ S3로 보낸 로그는 소스마다 경로와 포맷이 다르다. Fluentd와 Da
 10 DPU x 5/60 시간 x 0.44달러 x 48회 = 약 17.6달러/일, 한 달 약 530달러
 ```
 
-스케줄을 늦춰 실시간성을 포기해도 실행 한 번에 붙는 DPU와 크롤러 최소 시간은 그대로라 총액이 덜 줄었다. 남는 자원으로 돌리는 Flex 실행은 DPU 시간당 0.29달러로 싸지만, 시작과 끝 시각이 들쭉날쭉해도 되는 잡용이다. 실제로 성능이 나빴고, 여러 잡을 동시에 넣으면 일부가 자리를 못 잡고 멈춰 접었다.
+스케줄을 1시간으로 늦춰 실행 횟수를 절반으로 줄여도, 한 번에 처리할 파일이 두 배라 실행 시간이 늘어난다. 줄어드는 것은 실행마다 붙는 최소 과금과 크롤러 10분 같은 고정분뿐이라 총액은 절반까지 줄지 않았다. 남는 자원으로 도는 Flex 실행(DPU 시간당 0.29달러)도 써 봤지만 시작이 늦고 동시에 넣으면 일부가 멈춰 접었다.
 
-실행마다 붙는 고정분을 없애려고 잡을 계속 떠 있게 했다. Glue는 Spark 런타임과 라이브러리를 담은 Docker 이미지(`public.ecr.aws/glue/aws-glue-libs`)를 내놓는다. 이 이미지를 ECS Fargate Spot(남는 자원을 싸게 쓰는 대신 언제든 회수될 수 있는 컨테이너 실행 환경)에 올려 상시 루프로 돌리면 과금 단위가 DPU 시간에서 태스크가 떠 있는 시간으로 바뀌고, vCPU와 메모리를 일의 양에 맞춰 고를 수 있다.
+실행마다 붙는 고정분을 없애려고 잡을 계속 떠 있게 했다. Glue는 Spark 런타임과 라이브러리를 담은 Docker 이미지(`public.ecr.aws/glue/aws-glue-libs`)를 내놓는다. 이 이미지를 ECS Fargate Spot(언제든 회수될 수 있는 대신 싼 컨테이너 실행 환경)에 올려 상시 루프로 돌리면 과금 단위가 DPU 시간에서 태스크가 떠 있는 시간으로 바뀌고, vCPU와 메모리를 일의 양에 맞춰 고를 수 있다.
 
 Fargate Spot은 AWS가 자원을 회수하기 2분 전에 컨테이너에 SIGTERM을 보낸다. 그 뒤 `stopTimeout`(기본 30초, 최대 120초)이 지나면 SIGKILL로 끝낸다. 그래서 루프는 짧은 단위로 커밋하고, 다시 떠도 이어서 돌게 만든다.
 
 ## 직접 만든 북마크
 
-컨테이너 이미지에는 빠지는 기능이 있다. 공식 문서의 미지원 기능 목록 맨 위가 어디까지 처리했는지 남겨 두는 작업 북마크(job bookmark)다. 이것이 없으면 돌 때마다 같은 파일을 다시 읽는다.
+컨테이너 이미지에는 빠지는 기능이 있다. 공식 문서의 미지원 기능 목록에 어디까지 처리했는지 남겨 두는 작업 북마크(job bookmark)가 들어 있다. 이것이 없으면 돌 때마다 같은 파일을 다시 읽는다.
 
 문서는 S3 입력일 때 객체의 마지막 수정 시각(`LastModified`)으로 다시 처리할 객체를 가린다고 적는다. `LastModified`는 boto3 `list_objects_v2` 결과에 객체마다 들어 있어 따로 조회할 필요가 없다. 서비스마다 상태 파일을 `bookmarks/` 아래에 두고 "여기까지 봤다"는 시각(기준선)을 적는다.
 
@@ -113,31 +105,26 @@ Fargate Spot은 AWS가 자원을 회수하기 2분 전에 컨테이너에 SIGTER
 
 기준선보다 늦은 파일만 읽는 규칙은 경계에서 파일을 흘린다. 큰 파일을 조각으로 나눠 올리는 멀티파트 업로드에서, S3 문서에 따르면 `LastModified`는 업로드를 **시작한 시각**이다.
 
-S3 목록은 강한 일관성이라 업로드가 끝난 파일은 바로 보이지만, 큰 파일이 올라가는 동안 다른 파일로 기준선이 넘어가면 그 파일은 보이는 순간 이미 기준선보다 앞이다.
+S3 목록은 강한 일관성이라 업로드가 끝나면 바로 보인다. 11:50에 업로드를 시작한 큰 파일은 11:58에야 목록에 나타나지만 `LastModified`는 11:50이다. 그 사이 11:55 파일을 처리해 기준선이 11:55로 올라갔다면, 이 파일은 기준선보다 이른 시각이라 다시는 읽히지 않는다.
 
-관리형 Glue 북마크도 같은 문제를 다룬다. S3 연결 옵션 `maxBand`(기본 900000ms, 15분)는 마지막 15분 안에 수정된 파일을 따로 추적하게 하고, `maxFilesInBand`는 그 창에 기억할 파일 수의 상한이다. 직접 만든 북마크에도 기준선 앞을 다시 보는 창을 두었다. 모드를 바꿔 가며 목록 뜨기를 눌러, 첫 목록 뒤에 늦게 나타난 파일이 두 번째 실행에서 읽히는지 비교한다.
+관리형 Glue 북마크도 같은 문제를 다룬다. S3 연결 옵션 `maxBand`(기본 900000ms, 15분)는 마지막 15분 안에 수정된 파일을 따로 추적하게 한다. 직접 만든 북마크에도 기준선 이전 구간을 다시 보는 창을 두었다. 모드를 바꿔 가며 목록 뜨기를 눌러, 첫 목록 뒤에 늦게 나타난 파일이 두 번째 실행에서 읽히는지 비교한다.
 
 <figure class="fig" data-figure="s3-log-system-edge">
   <figcaption>늦게 보인 파일과 되돌아보는 창</figcaption>
 </figure>
 
-기준선만 쓰면 두 번째 실행은 기준선보다 늦은 새 파일만 읽고, 늦게 보인 파일은 기준선보다 앞이라 영영 읽지 않는다. 창을 두면 기준선 앞 구간을 한 번 더 보고, 처리한 파일에 붙여 둔 객체 태그(`etl_processed=true`, `etl_processed_at`)가 없는 파일만 골라 처리한다. 태그는 객체당 10개까지 붙고, 조회는 파일마다 요청이라 창 안의 파일만 태그를 본다.
+기준선만 쓰면 두 번째 실행은 기준선보다 늦은 새 파일만 읽고, 늦게 보인 파일은 영영 읽지 않는다. 창을 두면 기준선 이전 구간을 한 번 더 보고, 처리한 파일에 붙여 둔 객체 태그(`etl_processed=true`, `etl_processed_at`)가 없는 파일만 골라 처리한다. 태그 조회는 파일마다 요청이라 창 안의 파일만 태그를 본다.
 
-경계에서 새지 않게 붙인 장치가 더 있다.
+기준선을 움직이는 규칙도 둘 둔다.
 
 - 기준선을 되돌리지 않는다. 회수하는 중에 기준선이 뒤로 가면 같은 구간을 다시 읽어 중복으로 쌓인다.
 - 성공한 배치까지만 커밋한다. 중간에 실패했는데 기준선만 앞서 가면 그 사이가 통째로 빈다.
-- 한 번에 훑는 날짜에 상한을 둔다. LIST 요청은 GET보다 12.5배 비싸서, 밀린 상태에서 한꺼번에 훑으면 요청 비용이 튄다.
-- Glacier 객체는 읽지 않고 지나간다. 복원 전 객체에서 읽기가 실패해 기준선이 멈추는 것을 막는다.
-- 신규 0건이면 넓혀 훑는다. 폐기된 서비스에서 기준선이 과거에 멈춰 매번 헛스캔하는 것을 막는다.
 
-이 장치들이 맞게 도는지는 입력 파일의 행 수와 테이블 행 수를 시간 단위로 맞춰 보는 점검으로 확인한다.
+이 규칙이 맞게 도는지는 입력 파일의 행 수와 테이블 행 수를 시간 단위로 맞춰 보는 점검으로 확인한다.
 
 ## Athena 스캔 비용
 
-Athena는 S3의 파일에 SQL을 실행하는 서비스이고, 자기 저장소가 없다. 데이터는 S3에 있고, 그것이 어떤 테이블인지는 Glue Data Catalog가 들고 있다.
-
-Athena는 Glue 카탈로그에 만든 Iceberg 테이블만 지원한다. 카탈로그에는 테이블 위치와 현재 `metadata.json`의 경로만 있고, 파일 목록과 파티션 값은 Iceberg 메타데이터에 있다.
+Athena는 S3의 파일에 SQL을 실행하는 서비스이고, 자기 저장소가 없다. 어떤 파일이 어떤 테이블인지는 Glue Data Catalog가 들고 있고, Athena는 이 카탈로그에 만든 Iceberg 테이블만 지원한다. 카탈로그에는 테이블 위치와 현재 `metadata.json`의 경로만 있고, 파일 목록과 파티션 값은 Iceberg 메타데이터에 있다.
 
 쿼리 하나는 메타데이터를 두 층 거쳐 읽을 파일을 고른다. 스냅샷은 커밋 한 번이 끝난 시점의 테이블 상태이고, 쿼리는 가장 최근 스냅샷에서 시작한다.
 
@@ -167,20 +154,12 @@ Athena는 실행 시간이 아니라 읽은 바이트로 과금한다. 1TB당 5�
   <figcaption>1시간을 조회할 때 읽는 시간 폴더 (폴더 하나 1GB로 가정)</figcaption>
 </figure>
 
-결과 행은 같은데 `dt`만 걸면 그날 24개 폴더를 다 읽어 24GB, `hour`까지 걸면 1GB다(폴더 하나 1GB인 예시). 테이블에 `hour` 파티션이 있어도 쿼리가 그 조건을 걸지 않으면 매니페스트 단계에서 거를 근거가 없다. 대시보드가 필터 후보마다 쿼리를 따로 날리면 같은 범위를 필터 수만큼 반복해 읽으므로 `GROUPING SETS`로 묶는다.
-
-```sql
-SELECT level, service, count(*) FROM logs.app_logs
-WHERE dt = '20261102' AND hour = '14'
-GROUP BY GROUPING SETS ((level), (service));
-```
+결과 행은 같은데 `dt`만 걸면 그날 24개 폴더를 다 읽어 24GB, `hour`까지 걸면 1GB다. 테이블에 `hour` 파티션이 있어도 쿼리가 그 조건을 걸지 않으면 매니페스트 단계에서 거를 근거가 없다. 대시보드가 필터 후보마다 쿼리를 따로 날리면 같은 범위를 필터 수만큼 반복해 읽으므로 `GROUP BY GROUPING SETS ((level), (service))`처럼 한 쿼리로 묶는다.
 
 쿼리 설정과 한도를 묶는 단위인 워크그룹에 스캔 한도를 걸면 되지 않나 싶지만, 취소된 쿼리도 취소될 때까지 읽은 만큼 과금된다. 한도에 걸리면 결과는 없고 요금은 한도까지 나간다.
 
 - 쿼리당 한도: 10MB 이상으로 정한다. 넘으면 그 쿼리를 취소한다.
 - 워크그룹 전체 한도: 넘어도 쿼리를 취소하지 않고 CloudWatch 알람과 SNS 알림만 보낸다.
-
-쿼리를 짜는 곳이 여러 군데라, 실행 이력에서 `dt` 조건이 없거나 한도로 취소된 쿼리를 골라내는 점검을 따로 돌린다.
 
 ## 작은 파일과 파티션 스펙
 
@@ -198,14 +177,12 @@ WHERE dt = '20261102';
 ```
 
 - `WHERE`에는 파티션 컬럼만 쓸 수 있고, 합치면서 읽은 바이트만큼 과금된다.
-- 합칠 파일이 `optimize_rewrite_data_file_threshold`(기본 5)개보다 적으면 다시 쓰지 않는다.
 - 합친 뒤에도 옛 파일은 이전 스냅샷이 가리키고 있어 남는다. `VACUUM`이 `vacuum_max_snapshot_age_seconds`(기본 5일)보다 오래된 스냅샷을 만료시킬 때 지워진다.
 
-Glue Data Catalog의 관리형 압축(table optimizer)은 전체 테이블을 계획하는 단계에서 죽어 쓰지 못했다. 그래서 `dt` 단위로 `OPTIMIZE`를 돌리는 별도 태스크를 뒀다.
+Glue Data Catalog의 관리형 압축(table optimizer)은 전체 테이블을 계획하는 단계에서 실패해, `dt` 단위로 `OPTIMIZE`를 돌리는 별도 태스크를 뒀다.
 
 - `ICEBERG_OPTIMIZE_MORE_RUNS_NEEDED`로 끝나면 실패가 아니라 남은 일이 있다는 뜻이다. 성공할 때까지 같은 문을 반복한다.
 - 압축 자체가 스캔 한도에 걸리면 `dt`에서 `service`, `hour` 순으로 범위를 쪼갠다.
-- Spot 회수로 끊기면 끝낸 범위의 완료 표시를 S3에 남겨 이어서 돈다.
 
 압축을 잘 돌려도 파일 수는 파티션 수 아래로 내려가지 않는다. 파티션마다 파일이 최소 하나는 있어야 해서, `hour`를 넣으면 서비스 3개에 하루 72칸이 생긴다. 아래 그림처럼 `hour`를 빼면 파일 수는 줄지만 1시간 조회가 하루치를 읽는다.
 
@@ -217,7 +194,7 @@ Glue Data Catalog의 관리형 압축(table optimizer)은 전체 테이블을 �
 
 스펙은 나중에 바꾸기도 어렵다. Iceberg의 파티션 진화(partition evolution)는 메타데이터만 바꾸고 이미 쓴 파일은 옛 스펙으로 둔다. Athena의 Iceberg DDL은 열 추가, 삭제, 변경만 다루고 파티션 스펙을 바꾸는 문은 없다.
 
-새로 만든다면 `PARTITIONED BY (day(ts))`처럼 `ts`에서 파티션을 끌어내는 숨은 파티셔닝(hidden partitioning)으로 쿼리가 `ts` 조건만 걸어도 파티션을 거르게 하고, S3가 Iceberg 테이블의 압축까지 맡아 주는 S3 Tables도 후보로 놓는다.
+새로 만든다면 `PARTITIONED BY (day(ts))`처럼 `ts`에서 파티션을 끌어내는 숨은 파티셔닝(hidden partitioning)으로 쿼리가 `ts` 조건만 걸어도 파티션을 거르게 한다.
 
 ## 정리
 
@@ -230,9 +207,8 @@ Glue Data Catalog의 관리형 압축(table optimizer)은 전체 테이블을 �
 
 ## 참고
 
-- [Elastic: Index settings (number_of_replicas, codec)](https://www.elastic.co/docs/reference/elasticsearch/index-settings/index-modules)
+- [Elastic: Index settings (number_of_replicas)](https://www.elastic.co/docs/reference/elasticsearch/index-settings/index-modules)
 - [Elastic: Index lifecycle](https://www.elastic.co/docs/manage-data/lifecycle/index-lifecycle-management/index-lifecycle)
-- [Elastic: ILM settings (poll_interval)](https://www.elastic.co/docs/reference/elasticsearch/configuration-reference/index-lifecycle-management-settings)
 - [Amazon S3: Lifecycle transition considerations](https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-transition-general-considerations.html)
 - [Amazon S3: Object metadata (Last-Modified)](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html)
 - [Amazon S3: Data consistency model](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html#ConsistencyModel)

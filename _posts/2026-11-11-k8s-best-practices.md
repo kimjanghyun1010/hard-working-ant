@@ -13,7 +13,7 @@ scripts: [figures/k8s-best-practices.js]
 
 Service는 가상 IP(ClusterIP) 하나다. 실제로 어느 파드로 보낼지는 EndpointSlice라는 객체가 정한다. EndpointSlice 컨트롤러가 Service의 셀렉터(파드를 고르는 라벨 조건)에 맞는 파드 IP를 모아 이 객체에 적고, 노드마다 도는 kube-proxy가 이 목록을 iptables 규칙(커널이 패킷의 목적지를 바꾸거나 거르는 규칙)으로 바꾼다. Service IP로 보낸 패킷은 보낸 쪽 노드의 규칙에서 파드 IP 하나로 바뀐다.
 
-목록의 엔드포인트마다 상태 조건이 셋 붙는다.
+파드는 안의 컨테이너가 모두 Ready일 때 Ready다. 목록의 엔드포인트마다 이 Ready를 바탕으로 상태 조건이 셋 붙는다.
 
 - `serving`: 파드의 Ready 조건을 그대로 옮긴 값.
 - `terminating`: 파드에 삭제 표시가 붙으면 true.
@@ -21,13 +21,13 @@ Service는 가상 IP(ClusterIP) 하나다. 실제로 어느 파드로 보낼지�
 
 kube-proxy는 목록이 바뀔 때마다 규칙을 다시 쓰되, 너무 잦은 갱신을 묶으려고 최소 간격을 둔다(`--iptables-min-sync-period`, 기본 1초). 목록 변경이 API 서버를 거쳐 노드마다 따로 반영되므로, 파드 상태가 바뀐 순간과 모든 노드의 규칙이 바뀐 순간 사이에는 늘 시차가 있다.
 
-파드는 안의 컨테이너가 모두 Ready일 때 Ready다. readiness probe가 없는 컨테이너는 시작하자마자 Ready로 친다. 그래서 프로세스만 뜨고 설정 로드와 커넥션 풀 준비가 덜 끝난 앱도 곧바로 목록에 들어가 connection refused를 낸다. 아래 그림처럼 readiness probe를 두면 새 파드는 검사를 통과한 뒤에야 목록에 들어간다.
+readiness probe가 없는 컨테이너는 시작하자마자 Ready로 친다. 그래서 프로세스만 뜨고 설정 로드와 커넥션 풀 준비가 덜 끝난 앱도 곧바로 목록에 들어가 connection refused를 낸다. 아래 그림처럼 readiness probe를 두면 새 파드는 검사를 통과한 뒤에야 목록에 들어간다.
 
 <figure class="fig" data-figure="k8s-best-practices-readiness">
   <figcaption>새 파드 C가 엔드포인트에 들어가는 시점</figcaption>
 </figure>
 
-readiness probe는 kubelet(노드마다 돌며 컨테이너를 띄우고 검사하는 에이전트)이 `periodSeconds`마다 앱에 묻는 검사다. `failureThreshold`번 연속 실패하면 kubelet이 파드의 Ready를 false로 바꾸고, EndpointSlice 컨트롤러가 그 파드를 모든 Service의 목록에서 뺀다. 아직 Ready가 아닌 컨테이너는 빨리 Ready가 되도록 `periodSeconds`와 다른 때에도 검사할 수 있다.
+readiness probe는 kubelet(노드마다 돌며 컨테이너를 띄우고 검사하는 에이전트)이 `periodSeconds`마다 앱에 묻는 검사다. `failureThreshold`번 연속 실패하면 kubelet이 파드의 Ready를 false로 바꾸고, EndpointSlice 컨트롤러가 그 파드를 모든 Service의 목록에서 뺀다.
 
 ```yaml
 readinessProbe:
@@ -147,7 +147,7 @@ Deployment가 세는 "사용 가능"은 파드가 Ready가 된 뒤 `minReadySeco
   <figcaption>파드 A를 지울 때 규칙에서 빠지는 시점과 SIGTERM (2초는 대략값)</figcaption>
 </figure>
 
-preStop이 없으면 A는 삭제 직후 내려가고, 규칙에서 빠지는 2초 동안 A로 간 요청이 실패한다. preStop에서 5초를 기다리면 규칙에서 먼저 빠진 뒤에 SIGTERM이 와서 실패가 없다. preStop이 끝나야 SIGTERM이 나가기 때문이다.
+preStop이 없으면 A는 삭제 직후 내려가고, 규칙에서 빠지는 2초 동안 A로 간 요청이 실패한다. preStop에서 5초를 기다리면 규칙에서 먼저 빠진 뒤에 SIGTERM이 와서 실패가 없다.
 
 ```yaml
 spec:

@@ -62,7 +62,7 @@ umount -l /put_old                         # 옛 루트를 떼어 낸다
   <figcaption>chroot와 pivot_root에서 위로 올라가는 길</figcaption>
 </figure>
 
-runc도 같은 순서를 밟는다. 새 루트로 옮긴 뒤(`pivot_root`) 옛 루트를 떼어 내는데(`umount2`), 그 전에 옛 루트에서 일어나는 마운트 변화가 호스트 쪽으로 번지지 않게 전파(mount propagation)를 끊어 둔다. 끊지 않으면 컨테이너 안에서 뗀 마운트가 호스트에서도 떨어질 수 있다.
+runc도 같은 순서를 밟는다. 새 루트로 옮긴 뒤(`pivot_root`) 옛 루트를 떼어 낸다(`umount2`).
 
 떼어 낸 루트도 다시 마운트할 수 있으면 되살아난다. `--privileged` 컨테이너는 호스트의 디스크 장치가 보이고 mount도 부를 수 있어서 호스트 파일 시스템을 다시 붙일 수 있다.
 
@@ -111,7 +111,7 @@ user namespace는 안의 UID를 밖의 다른 UID로 옮겨 적는다(`/proc/<pi
 
 namespace는 나눠 갖기도 한다. 쿠버네티스 파드 안 컨테이너는 network, ipc, uts namespace를 같이 쓴다. 앱 옆에 붙어 프록시나 로그 수집을 맡는 사이드카(sidecar) 컨테이너가 앱에 `localhost:8080`으로 붙는 이유다.
 
-containerd는 작은 pause 컨테이너를 먼저 띄워 이 namespace를 잡아 두고, 앱 컨테이너를 그 안으로 들여보낸다. CRI-O는 기본값(`drop_infra_ctr=true`)에서 파드 단위 PID namespace를 쓰지 않으면 pause 컨테이너를 띄우지 않고, pinns라는 작은 도구로 namespace 파일을 바인드 마운트해 남겨 둔다.
+containerd는 작은 pause 컨테이너를 먼저 띄워 이 namespace를 잡아 두고, 앱 컨테이너를 그 안으로 들여보낸다.
 
 namespace는 보이는 것만 나누고 양은 나누지 않는다. 컨테이너 프로세스도 호스트의 CPU와 메모리를 다른 프로세스와 똑같이 나눠 쓰므로, 한 컨테이너가 메모리를 다 쓰면 옆 컨테이너도 같이 모자란다.
 
@@ -150,14 +150,7 @@ pivot_root로 올릴 새 루트에는 OS 파일과 앱이 깔려 있어야 한�
 
 레이어 하나의 이름은 압축을 푼 tar 내용으로 계산한 sha256 해시(DiffID)다. 내용이 한 바이트만 달라도 이름이 바뀐다.
 
-디스크에 풀어 둔 레이어는 DiffID가 아니라 아래 레이어까지 이어 계산한 ChainID로 구분한다. 같은 변경분이라도 깔린 바닥이 다르면 결과 파일 시스템이 다르기 때문이다. DiffID가 같아도 아래 레이어가 다르면 따로 저장되고, 베이스부터 같은 레이어를 쌓은 이미지끼리만 디스크를 나눠 쓴다.
-
-```text
-ChainID(L0)    = DiffID(L0)
-ChainID(L0|L1) = sha256(ChainID(L0) + " " + DiffID(L1))
-```
-
-Docker의 `/var/lib/docker/image/overlay2/layerdb/sha256/` 아래 디렉터리 이름이 이 ChainID이고, 그 안의 `diff` 파일에 DiffID가, `parent` 파일에 아래 레이어의 ChainID가 들어 있다.
+디스크에는 아래 레이어까지 포함한 해시(ChainID)로 저장되므로, 같은 변경분이라도 베이스가 다르면 따로 저장된다. 베이스부터 같은 이미지끼리만 디스크를 나눠 쓴다.
 
 Dockerfile에서는 `RUN`, `COPY`, `ADD`가 레이어를 하나씩 만들고 `CMD`, `ENV`는 설정만 바꾼다. 아래 그림처럼 베이스가 같은 이미지 둘은 베이스 레이어를 디스크에 한 벌만 둔다.
 
@@ -188,16 +181,14 @@ CMD node /app/server.js
   <figcaption>읽기, 고치기, 지우기에서 OverlayFS 세 층</figcaption>
 </figure>
 
-OverlayFS의 화이트아웃은 장치 번호가 0/0인 문자 장치 파일이고, 디렉터리를 통째로 가릴 때는 `trusted.overlay.opaque` 속성을 단다. lowerdir는 어느 경우에도 바뀌지 않아서 컨테이너 백 개가 레이어 한 벌을 같이 읽는다.
+lowerdir는 고치거나 지울 때도 바뀌지 않아서 컨테이너 백 개가 레이어 한 벌을 같이 읽는다.
 
-Docker의 overlay2 드라이버는 레이어마다 `/var/lib/docker/overlay2/<id>/`를 두고, 그 안에 내용(`diff`), 아래 레이어 목록(`lower`), 짧은 이름(`link`)을 둔다. 짧은 이름의 링크는 `l/` 디렉터리에 모아 두는데, lowerdir 경로를 줄여 mount 인자가 페이지 크기를 넘지 않게 하려는 것이다. overlay2는 lower 층을 128개까지 쌓는다.
+Docker의 overlay2 드라이버는 레이어마다 `/var/lib/docker/overlay2/<id>/`를 두고 내용을 `diff`에 둔다. 실행 중인 컨테이너의 mount 정보에 lowerdir와 upperdir가 그대로 보인다(`l/...`은 레이어 경로를 줄인 링크다).
 
 ```text
 $ docker info
  Storage Driver: overlay2
  Docker Root Dir: /var/lib/docker
-$ ls /var/lib/docker/overlay2/<id>
-committed  diff  link  lower  work
 $ mount -t overlay
 overlay on /var/lib/docker/overlay2/<id>/merged type overlay
   (rw,lowerdir=l/K3TQ...:l/ZQ7M...,upperdir=<id>/diff,workdir=<id>/work)
@@ -262,5 +253,4 @@ docker ps -s             # SIZE는 upperdir, virtual은 이미지까지 합친 �
 - [Docker — Build cache](https://docs.docker.com/build/cache/)
 - [Docker — docker container stop](https://docs.docker.com/reference/cli/docker/container/stop/)
 - [Kubernetes — Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
-- [CRI-O — crio.conf(5)](https://github.com/cri-o/cri-o/blob/main/docs/crio.conf.5.md)
 - 원글: [Container System(cgroup namespaces)](https://kimjanghyun1010.tistory.com/64), [Container System(filesystem)](https://kimjanghyun1010.tistory.com/90)

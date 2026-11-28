@@ -34,11 +34,7 @@ node_cpu_seconds_total{cpu="0",mode="user"} 912.07
 - `up`: 수집에 성공하면 1, 실패하면 0
 - `scrape_duration_seconds`: 수집에 걸린 시간
 
-가져가는 쪽이 Prometheus라서 대상이 죽은 것도 Prometheus가 먼저 안다. 대상이 값을 보내는(push) 방식이면 값이 안 올 때 대상이 죽은 것인지 보낼 게 없는 것인지 따로 가려야 한다.
-
-조회할 때는 그 시각 이전의 가장 최근 샘플을 답으로 쓰고, 5분(`--query.lookback-delta`)보다 오래된 샘플은 버린다. 대상이 목록에서 빠지거나 어떤 시계열이 응답에서 사라지면 Prometheus는 그 시계열에 끊겼다는 표시(stale)를 남겨 그래프를 바로 끊는다.
-
-점과 점 사이에서 일어난 일은 Prometheus가 모른다.
+가져가는 쪽이 Prometheus라서 대상이 죽은 것도 Prometheus가 먼저 안다. 대상이 값을 보내는(push) 방식이면 값이 안 올 때 대상이 죽은 것인지 보낼 게 없는 것인지 따로 가려야 한다. 다만 `up`이 1이어도 모든 게 정상이라는 뜻은 아니다.
 
 ## 수집 실패와 외부 프로브
 
@@ -69,7 +65,7 @@ if __name__ == '__main__':
 
 조회가 실패하면 Gauge는 직전 값을 그대로 내준다. 실제 컨슈머는 0인데 그래프는 5에서 평평하고, `up`도 1이다.
 
-그래서 마지막 성공 시각을 같이 내보내고, 그 시각이 오래되면 PromQL(Prometheus의 조회 언어) 조건으로 알린다. GPU용 nvidia_gpu_exporter도 같은 이유로 마지막 수집의 성공 여부를 `nvidia_smi_last_collect_success`(성공 1, 실패 0)로 내준다.
+그래서 마지막 성공 시각을 같이 내보내고, 그 시각이 오래되면 PromQL(Prometheus의 조회 언어) 조건으로 알린다.
 
 ```promql
 time() - rabbitmq_poll_last_success_timestamp_seconds > 60
@@ -109,7 +105,7 @@ time() - rabbitmq_poll_last_success_timestamp_seconds > 60
 
 ## Counter와 rate
 
-대상이 제대로 응답해도 Prometheus가 받는 것은 스크레이프 순간의 숫자라서, 숫자의 종류에 따라 점 사이의 일이 남기도 하고 사라지기도 한다.
+대상이 제대로 응답해도 Prometheus는 점과 점 사이에서 일어난 일을 모른다. 받는 것은 스크레이프 순간의 숫자라서, 숫자의 종류에 따라 점 사이의 일이 남기도 하고 사라지기도 한다.
 
 - Gauge: 지금 값. 올라가고 내려간다. 큐 길이, 메모리 사용량.
 - Counter: 지금까지 쌓인 값. 늘기만 하고 프로세스가 재시작할 때만 0으로 돌아간다. 처리한 요청 수, 보낸 바이트 수.
@@ -130,7 +126,7 @@ rate(http_requests_total{job="api"}[5m])
 
 범위 안에는 샘플이 두 개 이상 있어야 해서, 대시보드 도구 Grafana의 `$__rate_interval`은 범위를 수집 주기의 4배 이상으로 잡는다.
 
-여러 시계열을 합칠 때는 `sum(rate(...))`처럼 rate를 먼저 한다. 먼저 합치면 시계열 하나가 재시작해 0이 된 것이 합계의 작은 감소로 묻혀 rate가 보정하지 못한다.
+여러 시계열을 합칠 때는 `sum(rate(...))`처럼 rate를 먼저 한다. rate는 값이 조금이라도 줄면 재시작으로 보기 때문이다. 먼저 합치면 시계열 하나가 재시작해 합계가 1,000에서 600으로 줄었을 때, rate는 합계 전체가 0부터 다시 600까지 센 것으로 보고 600을 통째로 증가량에 더해 가짜 급등을 그린다.
 
 [CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %})의 CPU 사용률도 idle 시간 Counter의 rate를 1에서 뺀 값이다.
 
@@ -203,13 +199,12 @@ groups:
   <figcaption>for가 없을 때와 5분일 때 같은 오류율에서 오는 알림</figcaption>
 </figure>
 
-for가 없으면 2분짜리 튐에도 발생과 해소 알림이 오고, for 5m을 두면 튐은 pending에서 끝나는 대신 장애도 5분 늦게 알린다. for는 튐을 거르는 만큼 **진짜 장애도 늦게** 알리므로, 그만큼 이어지면 사람이 움직여야 하는 시간으로 정한다. 조건이 풀렸다 걸리기를 반복하면 `keep_firing_for`로 firing을 조금 더 유지한다.
+for가 없으면 2분짜리 튐에도 발생과 해소 알림이 오고, for 5m을 두면 튐은 pending에서 끝나는 대신 장애도 5분 늦게 알린다. for는 튐을 거르는 만큼 **진짜 장애도 늦게** 알리므로, 그만큼 이어지면 사람이 움직여야 하는 시간으로 정한다.
 
 Prometheus는 규칙마다 따로 알림을 만든다. 노드 여덟 대가 물린 스위치가 죽으면 HostDown 알림이 여덟 개다. Alertmanager는 이 알림을 받아 묶고, 기다리고, 받을 곳을 골라 보낸다.
 
 - `group_by`: 같은 라벨 값을 가진 알림을 한 메시지로 묶는다.
 - `group_wait`(기본 30초): 새 묶음의 첫 알림이 오면 같은 묶음이 더 올 때까지 기다렸다 보낸다.
-- `group_interval`(기본 5분): 이미 보낸 묶음에 알림이 더해지면 이 간격 뒤에 다시 보낸다.
 - `repeat_interval`(기본 4시간): 해결되지 않은 알림을 다시 보내는 간격이다.
 
 아래 그림처럼 HostDown 여덟 개는 메시지 하나가 되고, 인증서 알림은 경로 규칙에 따라 다른 채널로 간다.
@@ -298,7 +293,6 @@ sidecar를 붙이면 Prometheus의 블록 크기 하한과 상한(`--storage.tsd
 - [Prometheus — FAQ (pull과 push)](https://prometheus.io/docs/introduction/faq/)
 - [Prometheus — Configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)
 - [Prometheus — Jobs and instances (up, scrape_*)](https://prometheus.io/docs/concepts/jobs_instances/)
-- [Prometheus — Querying basics (staleness)](https://prometheus.io/docs/prometheus/latest/querying/basics/)
 - [Prometheus — Metric types](https://prometheus.io/docs/concepts/metric_types/)
 - [Prometheus — Query functions (rate, histogram_quantile)](https://prometheus.io/docs/prometheus/latest/querying/functions/)
 - [Prometheus — Histograms and summaries](https://prometheus.io/docs/practices/histograms/)
@@ -310,7 +304,6 @@ sidecar를 붙이면 Prometheus의 블록 크기 하한과 상한(`--storage.tsd
 - [client_python](https://prometheus.github.io/client_python/)
 - [blackbox_exporter](https://github.com/prometheus/blackbox_exporter)
 - [windows_exporter](https://github.com/prometheus-community/windows_exporter)
-- [nvidia_gpu_exporter — Metrics](https://github.com/utkuozdemir/nvidia_gpu_exporter/blob/main/docs/METRICS.md)
 - [Thanos — Sidecar](https://thanos.io/tip/components/sidecar.md/)
 - [Thanos — Compactor](https://thanos.io/tip/components/compact.md/)
 - [Thanos — Querier](https://thanos.io/tip/components/query.md/)

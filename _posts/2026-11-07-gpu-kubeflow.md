@@ -31,19 +31,7 @@ runc는 이미지에 장치 파일이 없어 GPU를 찾지 못한다. nvidia 런
 - `0,1`이나 GPU UUID: 적은 GPU만.
 - 비었거나 없음: runc와 똑같이 동작해 GPU를 넣지 않는다.
 
-넣는 방식은 두 가지다.
-
-- legacy: 명세에 prestart 훅(컨테이너 프로세스가 뜨기 직전에 런타임이 부르는 프로그램)을 넣어, `nvidia-container-cli`가 장치와 라이브러리를 마운트한다.
-- CDI(Container Device Interface): GPU마다 필요한 장치 파일과 마운트를 YAML 명세로 적어 두고 런타임이 그대로 반영한다. 장치 이름은 `nvidia.com/gpu=0`, `nvidia.com/gpu=all` 꼴이다.
-
-지금 Toolkit의 기본 모드는 CDI다. 명세 파일이 없으면 컨테이너를 시작할 때 즉석(JIT)으로 만들고, 파일로 둘 때는 `/etc/cdi`나 `/var/run/cdi`에서 읽는다.
-
-```bash
-nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml
-nvidia-ctk cdi list            # nvidia.com/gpu=0, nvidia.com/gpu=all ...
-```
-
-명세 파일은 `nvidia-cdi-refresh` 서비스가 드라이버 업그레이드와 재부팅 때 다시 만들지만, MIG(GPU를 하드웨어에서 쪼개는 기능) 분할을 바꾼 뒤에는 직접 다시 만든다.
+Toolkit은 GPU마다 넣을 장치 파일과 마운트를 CDI(Container Device Interface)라는 YAML 명세로 적어 두고 반영한다. 명세 속 장치 이름은 `nvidia.com/gpu=0` 꼴이고, MIG(GPU를 하드웨어에서 쪼개는 기능) 분할을 바꾸면 이 명세를 다시 만든다(`nvidia-ctk cdi generate`).
 
 런타임은 `NVIDIA_VISIBLE_DEVICES`에 적힌 GPU를 넣을 뿐, 어느 파드에 어느 GPU를 줄지는 모른다. 스케줄러도 노드에 GPU가 몇 개 있는지 모른다. 이 둘을 잇는 것이 device plugin이다.
 
@@ -83,7 +71,9 @@ NVIDIA plugin 문서는 GPU를 요청하지 않은 컨테이너에 노드의 GPU
 
 ## GPU 나눠 쓰기
 
-CPU는 `500m`처럼 나눠 줄 수 있다. 리눅스 CPU 스케줄러 CFS가 100ms 주기마다 시간을 잘라 컨테이너들에 나눠 주기 때문이다([CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %}) 참고). device plugin의 GPU는 정수라서 GPU 하나가 컨테이너 하나에 통째로 간다. 노트북 파드가 GPU를 거의 쓰지 않아도 다른 파드는 그 GPU를 받지 못하고, 이런 GPU는 GPU 지표를 Prometheus 형식으로 내보내는 DCGM exporter의 `DCGM_FI_DEV_GPU_UTIL`(사용률)로 찾는다.
+CPU는 시간을 잘라 `500m`처럼 나눠 주지만([CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %}) 참고), device plugin의 GPU는 정수라서 GPU 하나가 컨테이너 하나에 통째로 간다.
+
+노트북 파드가 GPU를 거의 쓰지 않아도 다른 파드는 그 GPU를 받지 못한다. 이런 GPU는 GPU 지표를 Prometheus 형식으로 내보내는 DCGM exporter의 사용률 지표(`DCGM_FI_DEV_GPU_UTIL`)로 찾는다.
 
 NVIDIA가 내놓은 나누는 방법은 time-slicing, MPS, MIG 세 가지다.
 
@@ -185,7 +175,7 @@ spec:
 
 파드는 `resources.claims`로 이 템플릿을 가리킨다. 같은 ResourceClaim을 여러 컨테이너나 파드가 가리키면 장치 하나를 같이 쓴다.
 
-DRA 자원에는 아직 선점(preemption)이 없다. 우선순위가 높은 파드도 장치가 빌 때까지 Pending으로 기다린다.
+공식 문서의 한계 항목대로 DRA 자원에는 아직 선점(preemption)이 없다. 우선순위가 높은 파드도 장치가 빌 때까지 Pending으로 기다린다.
 
 ## GPU Operator
 
@@ -258,7 +248,6 @@ def train_pipeline():
 - [Kubernetes v1.34: DRA has graduated to GA](https://kubernetes.io/blog/2025/09/01/kubernetes-v1-34-dra-updates/)
 - [NVIDIA Container Toolkit — Architecture Overview](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/arch-overview.html)
 - [NVIDIA Container Toolkit — Support for Container Device Interface](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html)
-- [NVIDIA Container Toolkit — Release Notes (1.18.0 기본 모드 변경)](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/1.19.1/release-notes.html)
 - [NVIDIA Container Toolkit — Specialized Configurations with Docker (NVIDIA_VISIBLE_DEVICES)](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html)
 - [NVIDIA k8s-device-plugin](https://github.com/NVIDIA/k8s-device-plugin)
 - [NVIDIA GPU Operator — Time-Slicing GPUs in Kubernetes](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html)

@@ -112,12 +112,12 @@ plan은 코드와 state를 주소로 짝지어 견준다. 주소가 같으면 �
 
 count에서는 b가 빠지면 c가 1번으로 당겨진다. state의 `user[1]`은 b인데 코드의 `user[1]`은 c가 되어 1번을 c로 바꾸고, 코드에 없는 2번을 지우는 plan이 나온다. for_each는 키로 짝지으니 `user["b"]`만 state에 남고 그것만 지운다. 두 모드 모두 코드에서 뺀 것은 하나인데, count는 순번이 곧 주소라서 b 뒤의 자원까지 plan에 끌려 들어온다.
 
-이미 count로 만든 자원은 `moved` 블록으로 주소만 옮긴다. state 안의 이름만 바뀌고 실제 자원은 지우지 않는다.
+이미 count로 만든 자원을 for_each로 바꿀 때는 `moved` 블록으로 주소만 옮긴다. state 안의 이름만 바뀌고 실제 자원은 지우지 않는다.
 
 ```hcl
 moved {
-  from = google_compute_instance.web[0]
-  to   = google_compute_instance.web["a"]
+  from = google_service_account.user[1]
+  to   = google_service_account.user["b"]
 }
 ```
 
@@ -182,7 +182,7 @@ resource "google_compute_instance" "web" {
 
 기본 순서는 옛 VM을 지운 뒤 새 VM이 뜰 때까지 서비스가 끊기고, create_before_destroy는 새 VM이 먼저 떠 있어 끊기지 않는다. 그런데도 기본값이 아닌 이유는 두 자원이 잠시 함께 있어야 해서다. 클라우드에는 이름이 겹치면 안 되는 자원이 많아서, `name = "web"`처럼 이름을 고정한 VM은 새 VM을 만드는 단계에서 실패한다.
 
-이름에 접미사를 붙여 겹치지 않게 한 뒤에 켠다. 이 설정은 그 자원이 의존하는 자원에도 함께 적용된다.
+이름에 접미사를 붙여 겹치지 않게 한 뒤에 켠다. 이 설정은 그 자원이 참조하는 자원에도 번져서, VM이 참조하는 서브넷이 교체될 때도 새 서브넷을 먼저 만든다. 그 자원들의 이름도 겹치지 않게 해 둔다.
 
 교체를 막는 설정도 `lifecycle`에 있다.
 
@@ -195,13 +195,13 @@ VM이나 DB 줄에 `-/+`가 보이면 디스크와 IP가 바뀔 수 있으니 ap
 
 팀은 state를 노트북이 아니라 원격 저장소(backend)에 둔다. 그러면 두 사람이 같은 state로 동시에 apply하는 일이 생긴다. apply는 state를 읽고, 클라우드를 바꾸고, 새 state를 쓴다. 둘이 같은 state를 읽어 놓고 각자 쓰면 나중에 쓴 쪽이 앞의 결과를 덮는다.
 
-모드를 바꿔 A와 B가 몇 초 차이로 apply를 시작하게 하고, 맨 아래 state 줄에 무엇이 남는지 비교한다.
+A는 VM a를, B는 VM b를 추가하는 apply를 몇 초 차이로 시작한다. 모드를 바꿔 가며 맨 아래 state 줄에 무엇이 남는지 비교한다.
 
 <figure class="fig" data-figure="terraform-iac-lock">
   <figcaption>두 사람이 같은 state에 동시에 apply할 때 (시간은 대략값)</figcaption>
 </figure>
 
-잠금이 없으면 B가 VM a가 빠진 state를 써서, VM a는 클라우드에 있는데 state에서 사라진다. Terraform이 모르는 자원이 되어 다음 plan에도 나오지 않는다.
+잠금이 없으면 B는 A가 끝나기 전에 읽은 state에 VM b만 더해 쓴다. A가 적어 둔 VM a는 이 쓰기에 덮여, 클라우드에는 있는데 state에서 사라진다. Terraform이 모르는 자원이 되어 다음 plan에도 나오지 않는다.
 
 잠금이 있으면 B는 A가 끝날 때까지 기다렸다가 A가 쓴 state를 읽고 시작한다. B의 apply가 25초 늦어지는 대신 두 VM이 모두 state에 남는다.
 
@@ -224,7 +224,7 @@ terraform {
 
 잠금은 동시에 쓰는 것만 막는다. 잘못 고친 state를 쓰거나 지우는 사고는 막지 못해서, GCS backend 문서는 버킷의 객체 버전 관리를 켜 두라고 권한다.
 
-state를 손으로 올리는 `terraform state push`는 lineage가 다르거나 원격 state의 serial이 더 크면 거절한다. 그림의 v5, v6처럼 serial은 state가 바뀔 때마다 오르므로, 오래된 state로 새 state를 덮는 실수가 여기서 걸린다.
+state를 손으로 올리는 `terraform state push`는 lineage가 다르거나 원격 state의 serial이 더 크면 거절한다. serial은 state가 바뀔 때마다 오르므로, 오래된 state로 새 state를 덮는 실수가 여기서 걸린다.
 
 잠금이 풀리지 않고 남으면 `terraform force-unlock <잠금 ID>`로 푼다. 다른 사람이 잡은 잠금을 풀면 둘이 동시에 쓰게 되니, 자기가 건 잠금이 자동으로 풀리지 않았을 때만 쓴다.
 
