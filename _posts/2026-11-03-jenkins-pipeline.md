@@ -138,7 +138,7 @@ Warning: A secret was passed to "sh" using Groovy String interpolation, which is
 
 ## 데몬 없는 이미지 빌드
 
-에이전트 파드에서 `docker build`를 부르면 `Cannot connect to the Docker daemon`이 뜬다. 쿠버네티스 1.24에서 Docker를 런타임으로 쓰게 해 주던 dockershim이 빠졌다. 그 뒤로 노드는 containerd 같은 런타임으로 컨테이너를 띄우고, 파드가 이미지 빌드를 맡길 Docker 데몬(dockerd)은 없다. 노드의 `docker.sock`을 마운트하는 우회도 있지만, 그 소켓을 쥔 파드는 노드의 root와 같다.
+에이전트 파드에서 `docker build`를 부르면 `Cannot connect to the Docker daemon`이 뜬다. 쿠버네티스 노드는 containerd 같은 런타임으로 컨테이너를 띄우고, 파드가 이미지 빌드를 맡길 Docker 데몬(dockerd)은 없다. 노드의 `docker.sock`을 마운트하는 우회도 있지만, 그 소켓을 쥔 파드는 노드의 root와 같다.
 
 kaniko는 데몬 없이 컨테이너 안에서 이미지를 만든다.
 
@@ -154,7 +154,7 @@ kaniko는 데몬 없이 컨테이너 안에서 이미지를 만든다.
 
 이때 workspace는 마운트가 아니라서 `FROM`이 여럿인 멀티스테이지 빌드의 다음 `FROM`에서 지워진다. `--ignore-path=/home/jenkins`로 workspace를 지울 대상에서 뺀다.
 
-kaniko 원 저장소는 2025년 6월 3일에 아카이브됐고, 지금은 Chainguard 포크와 커뮤니티 포크(osscontainertools/kaniko)가 이어 간다.
+kaniko 원 저장소는 더 이상 관리되지 않아, Chainguard 포크나 커뮤니티 포크(osscontainertools/kaniko)를 쓴다.
 
 ## Shared Library
 

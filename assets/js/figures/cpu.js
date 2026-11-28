@@ -77,6 +77,17 @@
       C.text(ctx, value, x, y + 24, { size: 22, weight: 700, color, align: 'center' });
       if (sub) C.text(ctx, sub, x, y + 40, { size: 10, weight: 600, color, align: 'center' });
     };
+    // Request dots flowing along a path: n dots per lap, so a higher rate shows as a denser stream.
+    const flow = (ctx, pts, n, time, color, off = 0) => {
+      const seg = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1])), L = seg.reduce((a, b) => a + b, 0);
+      ctx.fillStyle = color;
+      for (let i = 0; i < n; i++) {
+        let d = (((time * 40) / L + (i + off) / n) % 1) * L, k = 0;
+        while (k < seg.length - 1 && d > seg[k]) d -= seg[k++];
+        const [a, b] = [pts[k], pts[k + 1]], f = Math.min(1, d / seg[k]);
+        ctx.beginPath(); ctx.arc(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 2.2, 0, TAU); ctx.fill();
+      }
+    };
     const server = (ctx, x, y, w, h, id) => {
       C.box(ctx, x, y, w, h, { fill: '#fff', r: 8 });
       C.box(ctx, x, y, 5, h, { fill: TONE[id][0], stroke: TONE[id][0], r: 2 });
@@ -94,7 +105,7 @@
           const u = time % (RUN + HOLD), j = Math.min(PTS.length - 1, Math.floor(u / LAP)), lap = u >= RUN ? 1 : (u - j * LAP) / LAP;
           const P = PTS[j], prev = j ? PTS[j - 1] : ZERO, g = hwa.smooth(lap), m = SHOW * PER + Math.min(lap * PER, PER - DT);
           const val = (id, key) => prev.s[id][key] + (P.s[id][key] - prev.s[id][key]) * g;
-          clock(ctx, map(ctx, P.n * 10), 32, 20, P.snaps, m);
+          clock(ctx, map(ctx, P.n * 10, time), 32, 20, P.snaps, m);
           const wide = w >= 460, sy = wide ? 12 : 76;
           const xs = wide ? [w - 120, w - 40] : [w * 0.3, w * 0.72];
           if (ids.length === 1) {
@@ -131,32 +142,35 @@
     // Normal: user, server A alone on the 1 vCPU node.
     sweep('cpu-share-alone', {
       ids: ['A'], stamp: ['초당 100까지 0%', 'ok'], notes: ['혼자면 vCPU를 다 써서, 초당 100까지 원하는 CPU를 모두 받는다.'],
-      map: (ctx, rps) => {
+      map: (ctx, rps, time) => {
         user(ctx, 0, 6, 46, 46);
-        C.arrow(ctx, [[48, 29], [74, 29]], 1, '#ced4da');
-        C.text(ctx, `${rps}/s`, 61, 20, { size: 10, weight: 600, color: U.text, align: 'center' });
-        server(ctx, 76, 6, 64, 46, 'A');
-        C.arrow(ctx, [[142, 29], [158, 29]], 1, '#ced4da');
-        C.box(ctx, 160, 0, 112, 58, { fill: '#fff', r: 10 });
-        C.text(ctx, 'vCPU 1개', 168, 14, { size: 9 });
-        return 246;
+        C.arrow(ctx, [[48, 29], [104, 29]], 1, '#ced4da');
+        flow(ctx, [[50, 29], [100, 29]], rps / 10, time, TONE.A[1]);
+        C.text(ctx, `초당 ${rps}`, 76, 18, { size: 10, weight: 600, color: U.text, align: 'center' });
+        server(ctx, 106, 6, 64, 46, 'A');
+        C.arrow(ctx, [[172, 29], [188, 29]], 1, '#ced4da');
+        C.box(ctx, 190, 0, 112, 58, { fill: '#fff', r: 10 });
+        C.text(ctx, 'vCPU 1개', 198, 14, { size: 9 });
+        return 276;
       },
     });
     // Contention: the same rate to servers A and B on the same vCPU; each gets only its turns.
     sweep('cpu-share-contend', {
       ids: ['A', 'B'], stamp: ['둘 다 50% 못 씀', 'bad'], notes: ['둘이면 초당 50(request 500m)부터 둘 다 원하는 CPU를 못 받는다.'],
-      map: (ctx, rps) => {
+      map: (ctx, rps, time) => {
         user(ctx, 0, 6, 46, 46);
-        C.arrow(ctx, [[48, 29], [56, 29], [56, 15], [74, 15]], 1, '#ced4da');
-        C.arrow(ctx, [[56, 29], [56, 43], [74, 43]], 1, '#ced4da');
-        C.text(ctx, `${rps}/s`, 23, 66, { size: 10, weight: 600, color: U.text, align: 'center' });
-        server(ctx, 76, 3, 64, 24, 'A');
-        server(ctx, 76, 31, 64, 24, 'B');
-        C.arrow(ctx, [[142, 15], [150, 15], [150, 29], [158, 29]], 1, '#ced4da');
-        C.line(ctx, [[142, 43], [150, 43], [150, 29]], '#ced4da', 1);
-        C.box(ctx, 160, 0, 112, 58, { fill: '#fff', r: 10 });
-        C.text(ctx, 'vCPU 1개', 168, 14, { size: 9 });
-        return 246;
+        C.arrow(ctx, [[48, 29], [70, 29], [70, 15], [104, 15]], 1, '#ced4da');
+        C.arrow(ctx, [[70, 29], [70, 43], [104, 43]], 1, '#ced4da');
+        flow(ctx, [[50, 29], [70, 29], [70, 15], [100, 15]], rps / 10, time, TONE.A[1]);
+        flow(ctx, [[50, 29], [70, 29], [70, 43], [100, 43]], rps / 10, time, TONE.B[1], 0.5);
+        C.text(ctx, `서버마다 초당 ${rps}`, 0, 68, { size: 10, weight: 600, color: U.text });
+        server(ctx, 106, 3, 64, 24, 'A');
+        server(ctx, 106, 31, 64, 24, 'B');
+        C.arrow(ctx, [[172, 15], [180, 15], [180, 29], [188, 29]], 1, '#ced4da');
+        C.line(ctx, [[172, 43], [180, 43], [180, 29]], '#ced4da', 1);
+        C.box(ctx, 190, 0, 112, 58, { fill: '#fff', r: 10 });
+        C.text(ctx, 'vCPU 1개', 198, 14, { size: 9 });
+        return 276;
       },
     });
   }

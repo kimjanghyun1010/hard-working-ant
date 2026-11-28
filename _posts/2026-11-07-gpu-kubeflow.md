@@ -142,7 +142,7 @@ MPS(Multi-Process Service)는 여러 프로세스의 작업을 한 GPU에서 동
 
 쿠버네티스 문서는 device plugin이 컨테이너마다 개수로만 요청하고, 장치를 나눠 쓰지 못하고, 속성으로 거르지 못한다고 적는다. 그래서 GPU 메모리 40GB가 필요한 학습이 T4 노드에 배치될 수 있고, 지금까지는 GPU Feature Discovery가 다는 `nvidia.com/gpu.product`, `nvidia.com/gpu.memory` 라벨과 nodeSelector로 피해 왔다.
 
-DRA(Dynamic Resource Allocation)는 PVC(필요한 디스크 조건을 적는 요청 객체)로 스토리지를 요청하듯 장치를 요청한다. 쿠버네티스 1.34에서 `resource.k8s.io`의 핵심 API가 정식(GA)이 됐다.
+DRA(Dynamic Resource Allocation)는 PVC(필요한 디스크 조건을 적는 요청 객체)로 스토리지를 요청하듯 장치를 요청한다.
 
 - DeviceClass: 장치 종류. 드라이버나 관리자가 만든다(`gpu.nvidia.com`).
 - ResourceSlice: 드라이버가 노드의 장치와 속성(모델, 메모리)을 올린다.

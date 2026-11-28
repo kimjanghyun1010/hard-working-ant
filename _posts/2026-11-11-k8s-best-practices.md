@@ -160,7 +160,7 @@ spec:
             seconds: 5
 ```
 
-- `sleep` 액션은 1.34에서 정식 기능(GA)이 됐다. kubelet이 직접 기다리므로 이미지에 sleep 명령이 없어도 된다. 그 전 버전은 `exec`로 `sleep 5`를 실행한다.
+- `sleep` 액션은 kubelet이 직접 기다리므로 이미지에 sleep 명령이 없어도 된다. 1.34보다 오래된 클러스터는 `exec`로 `sleep 5`를 실행한다.
 - 대기 시간은 규칙에서 빠지는 경로 중 가장 느린 쪽에 맞춘다.
 - preStop 시간도 유예 시간 안에 든다. 유예 60초에 preStop이 55초, 앱 종료가 10초 걸리면 앱은 종료를 마치기 전에 SIGKILL을 받는다. preStop이 유예 시간을 넘기면 kubelet은 한 번만 2초를 더 준다.
 

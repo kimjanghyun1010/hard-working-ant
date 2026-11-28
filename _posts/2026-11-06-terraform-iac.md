@@ -211,7 +211,7 @@ Terraform은 state를 쓸 수 있는 명령마다 자동으로 잠금을 건다.
 
 - gcs: state 옆에 `<워크스페이스>.tflock` 객체를 "존재하지 않을 때만" 조건으로 쓴다. 객체의 세대(generation) 번호가 잠금 ID다.
 - azurerm: state를 담은 blob(Azure Storage의 파일 객체)에 기한 없는 임대(lease)를 건다. 임대가 걸린 blob은 그 임대 ID 없이는 쓸 수 없다.
-- s3: `use_lockfile = true`면 `.tflock` 객체를 `If-None-Match: *` 조건으로 쓴다. 기본값은 false이고, 예전의 `dynamodb_table` 잠금은 폐기 예정이다.
+- s3: `use_lockfile = true`면 `.tflock` 객체를 `If-None-Match: *` 조건으로 쓴다. 기본값은 false이고, `dynamodb_table` 잠금은 폐기 예정이다.
 
 ```hcl
 terraform {

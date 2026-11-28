@@ -102,7 +102,7 @@ openssl s_client -connect shop.example.com:443 -tls1_2 </dev/null | grep -E "Pro
 
 클라이언트는 인증서에서 네 가지를 확인한다.
 
-- 이름: 접속한 주소가 SAN(Subject Alternative Name, 인증서가 덮는 이름 목록)에 있는지. 예전에 이름을 적던 CN(Common Name)은 보지 않고, 와일드카드 `*.shop.example.com`은 바로 아래 한 단계 이름만 맞는다(RFC 9525).
+- 이름: 접속한 주소가 SAN(Subject Alternative Name, 인증서가 덮는 이름 목록)에 있는지. CN(Common Name)은 보지 않고, 와일드카드 `*.shop.example.com`은 바로 아래 한 단계 이름만 맞는다(RFC 9525).
 - 기간: 오늘이 notBefore와 notAfter 사이인지.
 - 용도: extendedKeyUsage에 serverAuth가 있고, CA 인증서가 아닌지(basicConstraints CA:FALSE).
 - 서명: 발급자(Issuer)의 공개키로 인증서 서명이 맞는지.
@@ -155,11 +155,11 @@ resolver                kube-dns.kube-system.svc.cluster.local valid=30s ipv6=of
 
 nginx는 인증서의 AIA에서 OCSP 응답자 주소를 읽고 `resolver`로 그 이름을 푼다. `resolver`가 빠지면 주소를 풀지 못해 stapling이 붙지 않는다. `ssl_stapling_verify`는 받은 응답의 서명을 확인하므로 `ssl_trusted_certificate`에 중간 인증서와 루트를 넣는다.
 
-공인 인증서에서는 OCSP가 걷히고 있다.
+공인 인증서에서는 OCSP를 쓰지 않는 쪽으로 가고 있다.
 
-- CA/B 포럼(공인 CA와 브라우저 회사의 규정 기구)은 2023년 SC-063으로 OCSP를 선택, CRL을 필수로 바꿨다.
-- Let's Encrypt는 2025년 5월 7일 새 인증서에서 OCSP 주소를 빼고, 8월 6일 응답자를 껐다. 이유로 프라이버시를 들었다.
-- Firefox는 137부터 CRLite를 켰다. 모든 폐기 정보를 압축해 12시간마다 받아 두는 방식으로, 하루 평균 300kB를 내려받는다.
+- CA/B 포럼(공인 CA와 브라우저 회사의 규정 기구) 규정에서 CRL은 필수, OCSP는 선택이다.
+- Let's Encrypt 인증서에는 OCSP 주소가 없다. 이유로 프라이버시를 든다.
+- Firefox는 CRLite로 모든 폐기 정보를 압축해 12시간마다 받아 둔다. 하루 평균 300kB를 내려받는다.
 
 OCSP 주소가 없는 인증서에 stapling을 켜면 nginx는 `"ssl_stapling" ignored, no OCSP responder URL in the certificate` 경고를 남기고 건너뛴다. 인증서를 바꿀 때 `openssl x509 -in server.crt -noout -ocsp_uri`로 주소가 있는지부터 본다.
 
@@ -171,7 +171,7 @@ OCSP 주소가 없는 인증서에 stapling을 켜면 nginx는 `"ssl_stapling" i
   <figcaption>공인 TLS 인증서의 최대 유효기간과 Let's Encrypt 기본 유효기간</figcaption>
 </figure>
 
-- CA/B 포럼 SC-081: 398일이던 상한이 2026년 3월 15일부터 200일, 2027년 3월 15일부터 100일, 2029년 3월 15일부터 47일이다.
+- CA/B 포럼 SC-081: 상한은 지금 200일이고, 2027년 3월 15일부터 100일, 2029년 3월 15일부터 47일이다.
 - Let's Encrypt: 지금 90일이다. 2027년 2월 10일부터 기본 64일, 2028년 2월 16일부터 45일이 된다.
 
 47일이면 1년에 8번 갱신해야 하므로 ACME(CA에 발급과 갱신을 자동으로 요청하는 프로토콜, RFC 8555) 클라이언트인 cert-manager나 certbot으로 자동화한다. Let's Encrypt는 60일 고정 갱신으로는 부족하다며, CA가 갱신 시점을 알려 주는 ARI(ACME Renewal Information)를 쓰거나 수명의 3분의 2 지점에서 갱신하라고 권한다.

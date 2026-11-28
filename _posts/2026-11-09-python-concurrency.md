@@ -186,11 +186,11 @@ uvicorn main:app --workers 4
 
 계산이 많은 파드는 프로세스 하나에 request 1 정도로 잡고 레플리카로 늘린다. I/O 대기가 대부분인 API 서버는 프로세스 하나가 vCPU 하나도 다 쓰지 못하므로, 실제 사용량을 재서 그보다 낮게 잡는다.
 
-CPU 수로 크기를 정하는 기본값은 컨테이너에서 어긋난다. `os.cpu_count()`는 노드의 CPU 수를, 3.13에 들어온 `os.process_cpu_count()`는 affinity(이 프로세스가 돌아도 되는 CPU 목록)까지만 보고 CPU limit은 보지 않아서, 64코어 노드의 request 1짜리 파드에서도 64를 돌려준다.
+CPU 수로 크기를 정하는 기본값은 컨테이너에서 어긋난다. `os.cpu_count()`는 노드의 CPU 수를, `os.process_cpu_count()`는 affinity(이 프로세스가 돌아도 되는 CPU 목록)까지만 보고 CPU limit은 보지 않아서, 64코어 노드의 request 1짜리 파드에서도 64를 돌려준다.
 
 - `ThreadPoolExecutor`의 기본 스레드 수는 `min(32, CPU 수 + 4)`다. `asyncio.to_thread`가 쓰는 루프의 기본 풀도 이 값을 따른다.
 - `ProcessPoolExecutor`의 기본 프로세스 수는 CPU 수다. request 1인 파드에서 프로세스 64개를 띄운다.
-- 3.13부터 `PYTHON_CPU_COUNT` 환경 변수나 `-X cpu_count`로 이 값을 덮어쓴다.
+- `PYTHON_CPU_COUNT` 환경 변수나 `-X cpu_count`로 이 값을 덮어쓴다(3.13 이상).
 
 ```yaml
 env:
@@ -202,7 +202,7 @@ Go, Java, Node.js가 CPU limit을 읽는 방식은 [CPU 이해하기]({{ site.ba
 
 ## free-threaded 빌드
 
-프로세스를 나누지 않고 GIL 자체를 없애는 작업이 PEP 703이다. Python 3.13에 GIL을 끈 free-threaded 빌드가 실험 기능으로 들어왔고, 3.14에서 공식 지원으로 올라왔다(PEP 779). 기본 빌드는 여전히 GIL이 있는 쪽이고, free-threaded는 `python3.14t`처럼 따로 골라 설치한다.
+프로세스를 나누지 않고 GIL을 끈 free-threaded 빌드도 있다(PEP 703). 3.14부터 공식 지원하지만 기본 빌드는 여전히 GIL이 있는 쪽이고, free-threaded는 `python3.14t`처럼 따로 골라 설치한다.
 
 GIL이 지키던 참조 수는 다른 방법으로 지킨다.
 
