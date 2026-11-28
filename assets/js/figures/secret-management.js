@@ -113,24 +113,6 @@
     });
   });
 
-  // A config value and a password take the same road; only the password leaves copies that cannot be taken back.
-  flow('secret-management-git', {
-    cols: 4, rows: 2,
-    nodes: { dev: [0, 0, '개발자 PC', 'values.yaml'], git: [1, 0, 'git 저장소', 'main'], argo: [2, 0, 'Argo CD', '동기화'], k8s: [3, 0, '클러스터', 'Secret'], clone: [0, 1, '다른 클론', ''], ci: [2, 1, 'CI 러너', '작업 폴더'] },
-    scenes: [
-      { pill: '설정값', tone: 'info', note: '설정값은 git을 거쳐 클러스터까지 가도 남는 흔적이 문제 되지 않는다.', steps: [
-        ['dev', 'git', 'replicas: 3', 'info', '커밋하고 푸시한다'], ['git', 'argo', 'replicas: 3', 'info', 'Argo CD가 변경을 가져온다'], ['argo', 'k8s', 'replicas: 3', 'info', '클러스터에 적용한다'],
-      ], stamp: ['남아도 괜찮은 값', 'ok'] },
-      { pill: '비밀번호', tone: 'bad', note: '비밀번호는 거쳐 간 자리마다 평문으로 남고, 지우는 커밋을 올려도 히스토리에 그대로 있다.', steps: [
-        ['dev', 'git', 'PW=s3cr3t', 'plain', '푸시하는 순간 히스토리에 남는다', ['git', '평문 커밋', 'plain']],
-        ['git', 'clone', 'PW=s3cr3t', 'plain', '받아 간 클론마다 복사된다', ['clone', '평문 복사본', 'plain'], 'v'],
-        ['git', 'ci', 'PW=s3cr3t', 'plain', 'CI 작업 폴더에도 남는다', ['ci', '평문 복사본', 'plain'], 'v'],
-        ['git', 'argo', 'PW=s3cr3t', 'plain', 'Argo CD도 평문을 그대로 받는다'], ['argo', 'k8s', 'PW=s3cr3t', 'plain', '클러스터 Secret까지 평문으로 간다'],
-        ['dev', 'git', 'PW 지움', 'info', '지우는 커밋을 올려도 옛 커밋은 그대로다'],
-      ], stamp: ['지워도 히스토리에 남음', 'bad'] },
-    ],
-  });
-
   // Secret data is base64: written to etcd and read back without any key.
   flow('secret-management-base64', {
     cols: 3, rows: 2,
@@ -209,40 +191,6 @@
     });
   });
 
-  // Sealed Secrets: the public key leaves the cluster, the private key never does.
-  flow('secret-management-sealed', {
-    cols: 4, rows: 2,
-    nodes: { dev: [0, 0, '개발자 PC', 'kubeseal'], git: [1, 0, 'git', ''], ss: [2, 0, 'SealedSecret', ''], pod: [3, 0, '파드', ''], ctrl: [2, 1, '컨트롤러', '개인키'], sec: [3, 1, 'Secret', ''] },
-    groups: [['클러스터', 2, 0, 3, 1]],
-    scenes: [{ pill: 'Sealed Secrets', tone: 'ok', note: '공개키로 봉인한 값만 git에 오르고, 푸는 개인키는 클러스터 안 컨트롤러에만 있다.', steps: [
-      ['ctrl', 'dev', '공개키', 'info', '컨트롤러가 키 쌍을 만들고 공개키만 내준다'],
-      ['dev', 'git', 'SealedSecret', 'enc', '공개키로 봉인해 커밋한다', ['git', '암호문', 'enc']],
-      ['git', 'ss', 'SealedSecret', 'enc', 'Argo CD가 그대로 동기화한다', ['ss', '암호문', 'enc']],
-      ['ss', 'ctrl', '암호문', 'enc', '컨트롤러가 개인키로 푼다'],
-      ['ctrl', 'sec', 's3cr3t', 'plain', '일반 Secret을 만든다', ['sec', '평문', 'plain']],
-      ['sec', 'pod', 's3cr3t', 'plain', '파드가 Secret을 읽는다'],
-    ], stamp: ['개인키는 클러스터 안에만', 'ok'] }],
-  });
-
-  // SOPS: the same encrypted file, decrypted in the cluster by Flux or at render time by Argo CD with KSOPS.
-  flow('secret-management-sops', {
-    cols: 3, rows: 2,
-    nodes: { git: [0, 0, 'git', 'ENC[...]'], sec: [2, 0, 'Secret', ''], pod: [2, 1, '파드', ''] },
-    scenes: [
-      { pill: 'Flux', tone: 'ok', nodes: { flux: [1, 0, 'Flux', 'SOPS 키'] }, groups: [['클러스터', 1, 0, 2, 1]], note: 'Flux는 kustomize-controller가 클러스터 안에서 적용 직전에 푼다.', steps: [
-        ['git', 'flux', 'ENC[...]', 'enc', 'Flux가 암호화된 파일을 가져온다'],
-        ['flux', 'sec', 's3cr3t', 'plain', '적용 직전에 풀어 Secret을 만든다', ['sec', '평문', 'plain']],
-        ['sec', 'pod', 's3cr3t', 'plain', '파드가 Secret을 읽는다'],
-      ], stamp: ['클러스터 안에서 복호화', 'ok'] },
-      { pill: 'Argo CD + KSOPS', tone: 'warn', nodes: { repo: [1, 0, 'repo-server', 'KSOPS + 키'], redis: [1, 1, 'Redis', '캐시'] }, groups: [['Argo CD', 1, 0, 1, 1]], note: 'Argo CD는 repo-server에 붙인 KSOPS가 렌더링 때 풀어서, 평문 매니페스트가 캐시에 남는다.', steps: [
-        ['git', 'repo', 'ENC[...]', 'enc', 'repo-server가 파일을 가져온다'],
-        ['repo', 'redis', '매니페스트', 'plain', '렌더링하며 풀고 결과를 캐시한다', ['redis', '평문', 'plain']],
-        ['repo', 'sec', 's3cr3t', 'plain', '동기화로 Secret을 적용한다', ['sec', '평문', 'plain']],
-        ['sec', 'pod', 's3cr3t', 'plain', '파드가 Secret을 읽는다'],
-      ], stamp: ['렌더링 때 복호화', 'warn'] },
-    ],
-  });
-
   // argocd-vault-plugin: the placeholder becomes the value inside repo-server, and the manifest is cached.
   flow('secret-management-avp', {
     cols: 4, rows: 2,
@@ -256,20 +204,6 @@
       ['avp', 'redis', '매니페스트', 'plain', '완성된 매니페스트를 캐시한다', ['redis', '평문', 'plain']],
       ['redis', 'k8s', 's3cr3t', 'plain', '동기화로 Secret을 적용한다', ['k8s', '평문', 'plain']],
     ], stamp: ['Argo CD가 평문을 쥠', 'bad'] }],
-  });
-
-  // CMP sidecar: env names in the Application arrive in the sidecar with the ARGOCD_ENV_ prefix.
-  flow('secret-management-cmp', {
-    cols: 4, rows: 1,
-    nodes: { app: [0, 0, 'Application', 'plugin.env'], repo: [1, 0, 'repo-server', ''], side: [2, 0, 'avp-helm', '사이드카'], asm: [3, 0, 'ASM', ''] },
-    groups: [['repo-server 파드', 1, 0, 2, 0]],
-    scenes: [{ pill: '설정 관리 플러그인', tone: 'info', note: 'Application에 적은 HELM_ARGS는 사이드카에 ARGOCD_ENV_HELM_ARGS로 도착한다.', steps: [
-      ['app', 'repo', 'HELM_ARGS', 'info', 'Application에는 접두어 없이 적는다'],
-      ['repo', 'side', 'ARGOCD_ENV_HELM_ARGS', 'info', '사이드카에는 ARGOCD_ENV_가 붙어 도착한다', ['side', 'ARGOCD_ENV_', 'info']],
-      ['side', 'asm', 'IAM 역할', 'info', '사이드카의 자격증명으로 ASM에 접근한다'],
-      ['asm', 'side', 's3cr3t', 'plain', '값을 받아 YAML을 완성한다', ['side', '평문', 'plain']],
-      ['side', 'repo', 'YAML', 'plain', '소켓으로 repo-server에 돌려준다'],
-    ] }],
   });
 
   // ESO: Argo CD syncs only the reference; values move between the operator and the store.
@@ -287,50 +221,12 @@
     ], stamp: ['Argo CD는 참조만 봄', 'ok'] }],
   });
 
-  // CSI driver: at pod start the node fetches the value and mounts it as a file.
-  flow('secret-management-csi', {
-    cols: 4, rows: 2,
-    nodes: { kubelet: [0, 0, 'kubelet', '파드 시작'], drv: [1, 0, 'CSI 드라이버', ''], prov: [2, 0, 'Azure', 'provider'], kv: [3, 0, 'Key Vault', ''], pod: [1, 1, '파드', ''], sec: [2, 1, 'Secret', '선택'] },
-    groups: [['노드', 0, 0, 2, 1]],
-    scenes: [{ pill: 'Secrets Store CSI Driver', tone: 'info', note: '파드가 시작할 때 노드의 드라이버와 provider가 값을 가져와 파드 안 파일로 붙인다.', steps: [
-      ['kubelet', 'drv', '볼륨 마운트', 'info', 'kubelet이 CSI 볼륨을 붙인다'],
-      ['drv', 'prov', 'SecretProviderClass', 'info', '어느 볼트의 어느 값인지 넘긴다'],
-      ['prov', 'kv', '토큰', 'info', 'Key Vault에 값을 요청한다'],
-      ['kv', 'prov', 's3cr3t', 'plain', '평문 값을 받는다'],
-      ['prov', 'drv', 's3cr3t', 'plain', '드라이버에 돌려준다'],
-      ['drv', 'pod', 's3cr3t', 'plain', '파드 안 tmpfs에 파일로 쓴다', ['pod', '파일', 'plain']],
-      ['pod', 'sec', 's3cr3t', 'plain', 'secretObjects가 있으면 Secret도 만든다', ['sec', '평문', 'plain']],
-    ], stamp: ['파드 시작 때 가져옴', 'info'] }],
-  });
-
-  // AKS identity: the add-on identity is shared by the node; workload identity is per service account.
-  flow('secret-management-aks-identity', {
-    cols: 4, rows: 2,
-    nodes: { a: [0, 0, '파드 A', ''], b: [0, 1, '파드 B', ''], entra: [2, 0, 'Entra ID', ''], kv: [3, 0, 'Key Vault', 'Secrets User'] },
-    scenes: [
-      { pill: '애드온 관리 ID', tone: 'warn', nodes: { mi: [1, 0, '관리 ID', '노드 VMSS'] }, note: '애드온 관리 ID는 노드에 붙어 있어, 그 ID를 쓰는 파드는 모두 같은 권한을 받는다.', steps: [
-        ['a', 'mi', '파드 A', 'info', '파드 A가 볼륨을 붙이면 노드의 관리 ID를 쓴다'],
-        ['mi', 'entra', '관리 ID', 'info', 'Entra ID에서 토큰을 받는다'],
-        ['entra', 'kv', '토큰', 'info', 'Key Vault가 읽기를 허용한다', ['kv', '허용', 'enc']],
-        ['b', 'mi', '파드 B', 'info', '파드 B도 같은 관리 ID를 쓴다'],
-        ['mi', 'entra', '같은 ID', 'info', '같은 ID로 토큰을 받는다'],
-        ['entra', 'kv', '토큰', 'info', '파드 B도 같은 값을 읽는다', ['kv', '모두 허용', 'plain']],
-      ], stamp: ['노드의 파드가 같은 권한', 'warn'] },
-      { pill: '워크로드 ID', tone: 'ok', note: '워크로드 ID는 서비스 계정 토큰을 Entra ID 토큰으로 바꿔, 서비스 계정마다 권한을 나눈다.', steps: [
-        ['a', 'entra', 'SA 토큰', 'info', '파드 A의 서비스 계정 토큰을 보낸다', ['a', 'SA app-a', 'info']],
-        ['entra', 'kv', 'ID A 토큰', 'info', '연합 자격증명이 있는 ID로 읽는다', ['kv', 'A만 허용', 'enc']],
-        ['b', 'entra', 'SA 토큰', 'info', '파드 B의 서비스 계정 토큰을 보낸다', ['b', 'SA app-b', 'info']],
-        ['entra', 'b', '거부', 'bad', '연합 자격증명이 없어 거부된다', ['b', '거부', 'bad'], 'v'],
-      ], stamp: ['서비스 계정마다 권한', 'ok'] },
-    ],
-  });
-
   // Group: timelines. One lane per place the value lives; block colour is the value it holds.
   // stale: the old value still held after the source has changed.
   {
-    const FILL = { old: '#64748b', stale: '#f59e0b', new: U.blue, work: '#8b5cf6' }, LH = 46;
+    const FILL = { old: '#64748b', stale: '#f59e0b', new: U.blue, work: '#8b5cf6', gone: U.red }, LH = 46;
     const LEGEND = [['옛 값', FILL.old], ['밀린 값', FILL.stale], ['새 값', FILL.new]];
-    const tl = (name, scenes, { SEC = 7, HOLD = 2, demo } = {}) => document.querySelectorAll(`[data-figure="${name}"]`).forEach((root) => {
+    const tl = (name, scenes, { SEC = 7, HOLD = 2, demo, legend = LEGEND } = {}) => document.querySelectorAll(`[data-figure="${name}"]`).forEach((root) => {
       const n = scenes.length, lanes = Math.max(...scenes.map((s) => s.lanes.length));
       hwa.scene(root, {
         height: 52 + lanes * LH + 30, still: (n - 1) * (SEC + HOLD) + SEC + 0.6,
@@ -339,7 +235,7 @@
         frame: (ctx, w, h, time, say, ui) => {
           const auto = hwa.loop(time, SEC, HOLD, n), i = demo ? ui.mode : auto.i, s = scenes[i];
           const run = demo ? (ui.runAt === null ? -1 : time - ui.runAt) : (time % ((SEC + HOLD) * n)) - auto.i * (SEC + HOLD), k = clamp(run / SEC), t = k * s.span;
-          topBar(ctx, w, s.pill, s.tone, LEGEND);
+          topBar(ctx, w, s.pill, s.tone, legend);
           const lw = Math.min(84, w * 0.22), x0 = lw, x1 = w - 8, top = 52, base = top + s.lanes.length * LH + 4;
           const X = (v) => x0 + (clamp(v, 0, s.span) / s.span) * (x1 - x0), ly = (j) => top + j * LH;
           s.lanes.forEach((nm, j) => C.text(ctx, nm, 0, ly(j) + LH / 2, { size: fitSize(ctx, nm, lw - 6, 10, 600), weight: 600, color: U.text, base: 'middle' }));
@@ -369,24 +265,16 @@
       });
     });
 
-    // Demo: after the value changes in ASM, Refresh reuses the cached manifest; Hard Refresh renders again.
-    const ev = (label) => [[6, '값 변경'], [40, label], [75, 'Sync']], asm = [[0, 0, 6, 'old', ''], [0, 6, 100, 'new', 'v2']];
-    tl('secret-management-refresh', [
-      { pill: 'Refresh', tone: 'bad', span: 100, lanes: ['ASM', '캐시', '클러스터'], events: ev('Refresh'),
-        segs: [...asm, [1, 0, 6, 'old', ''], [1, 6, 100, 'stale', 'v1 매니페스트'], [2, 0, 6, 'old', ''], [2, 6, 100, 'stale', 'v1']],
-        stamp: ['v1 그대로', 'bad'], say: '커밋이 같으면 Refresh와 Sync는 캐시된 v1 매니페스트를 다시 써서 클러스터에 v1이 남는다.' },
-      { pill: 'Hard Refresh', tone: 'ok', span: 100, lanes: ['ASM', '캐시', '클러스터'], events: ev('Hard Refresh'),
-        segs: [...asm, [1, 0, 6, 'old', ''], [1, 6, 40, 'stale', 'v1'], [1, 40, 50, 'work', 'AVP'], [1, 50, 100, 'new', 'v2'], [2, 0, 6, 'old', ''], [2, 6, 75, 'stale', 'v1'], [2, 75, 100, 'new', 'v2']],
-        stamp: ['Sync 뒤 v2', 'ok'], say: 'Hard Refresh는 캐시를 버리고 AVP를 다시 돌려 v2를 가져오고, Sync가 클러스터에 v2를 적용한다.' },
-    ], { demo: { modes: ['Refresh', 'Hard Refresh'], run: '값 바꾸고 새로고침' } });
-
-    // Render-time injection ties the secret to app syncs: an unrelated release carries the changed value.
-    tl('secret-management-render-risk', [
-      { pill: '관련 없는 배포', tone: 'warn', span: 100, lanes: ['ASM', 'git 커밋', '클러스터'], events: [[20, '값 변경'], [60, '태그만 바꾼 배포', true]],
-        ticks: [[20, '월'], [60, '수']],
-        segs: [[0, 0, 20, 'old', 'v1'], [0, 20, 100, 'new', 'v2'], [1, 0, 3, 'work', ''], [1, 60, 63, 'work', ''], [2, 0, 20, 'old', 'v1'], [2, 20, 63, 'stale', '반영 안 됨'], [2, 63, 100, 'new', 'v2']],
-        stamp: ['배포에 섞여 반영', 'warn'], say: '월요일에 바꾼 값이 반영되지 않다가, 수요일에 이미지 태그만 바꾼 배포가 렌더링을 다시 하면서 함께 반영된다.' },
-    ], { SEC: 6 });
+    // Vault dynamic DB credentials: the account dies with its lease unless an agent renews it (TTL 1h example).
+    const leaseTk = [[20, '20분'], [40, '40분'], [60, '60분'], [80, '80분']];
+    tl('secret-management-lease', [
+      { pill: '한 번 읽고 끝', tone: 'bad', span: 80, lanes: ['Vault 리스', 'DB 계정', '앱 접속'], ticks: leaseTk, events: [[60, 'TTL 만료', true]],
+        segs: [[0, 0, 60, 'old', 'TTL 1h'], [1, 0, 60, 'old', 'v-app-x7k2'], [1, 60, 80, 'gone', '삭제'], [2, 0, 60, 'old', '접속'], [2, 60, 80, 'gone', '실패']],
+        stamp: ['만료와 함께 접속 끊김', 'bad'], say: '리스가 끝나면 Vault가 DB 계정을 지워서, 한 번 읽은 값을 계속 쓰는 앱은 접속이 끊긴다.' },
+      { pill: 'Vault Agent', tone: 'ok', span: 80, lanes: ['Vault 리스', 'DB 계정', '앱 접속'], ticks: leaseTk, events: [[40, 'TTL 2/3에서 갱신']],
+        segs: [[0, 0, 40, 'old', 'TTL 1h'], [0, 40, 80, 'new', '연장'], [1, 0, 80, 'old', 'v-app-x7k2'], [2, 0, 80, 'old', '접속']],
+        stamp: ['리스 연장, 계정 유지', 'ok'], say: 'Vault Agent는 TTL의 2/3가 지나면 리스를 연장해서, 계정과 접속이 끊기지 않는다.' },
+    ], { legend: [['발급된 계정', FILL.old], ['연장된 리스', FILL.new], ['폐기', FILL.gone]] });
 
     // Demo: rotation polls Key Vault every 2 minutes; a file reader sees it, an env var waits for a restart.
     const kv = [[0, 0, 40, 'old', 'v1'], [0, 40, 240, 'new', 'v2']], polled = (j) => [[j, 0, 40, 'old', 'v1'], [j, 40, 120, 'stale', 'v1'], [j, 120, 240, 'new', 'v2']];

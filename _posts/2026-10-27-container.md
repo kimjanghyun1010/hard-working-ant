@@ -1,71 +1,33 @@
 ---
 title: 컨테이너 이해하기
-description: 하이퍼바이저 VM과 컨테이너의 차이부터 namespace, cgroup, 이미지 레이어와 overlayfs, 볼륨, 파드까지 정리했다.
+description: 커널 하나를 같이 쓰는 프로세스가 자기만의 서버처럼 도는 원리를 루트 교체, namespace, cgroup, 이미지 레이어와 OverlayFS, copy-up과 볼륨의 순서로 정리했다.
 date: 2026-10-27 12:00:00 +0900
 series: Back to the Basic
 tags: [container, docker, linux, namespace, cgroup, overlayfs]
 scripts: [figures/container.js]
 ---
 
-## 가상화 방식
+## VM과 컨테이너
 
-API 서버와 배치 작업을 서버 한 대에 같이 올렸더니, 배치가 도는 밤마다 API가 같이 느려진다. 둘이 같은 파일 시스템, 같은 포트 번호, 같은 메모리를 나눠 쓰기 때문이다.
+컨테이너는 자기만의 서버를 가진 것처럼 돌지만, 호스트에서 보면 프로세스 하나다. 커널 하나를 같이 쓰는 프로세스를 떼어 놓으려면 네 가지를 따로 줘야 한다. 루트 파일 시스템, 보이는 커널 자원(namespace), 쓸 수 있는 양(cgroup), 그리고 루트에 깔 파일(이미지)이다.
 
-서버 한 대를 여러 서비스가 서로 모르게, 서로 넘치지 않게 나눠 쓰는 방법은 두 가지다.
+같은 문제를 VM은 커널을 따로 둬서 푼다. 하이퍼바이저(hypervisor)는 CPU, 메모리, 디스크를 VM 여러 대에 나눠 주는 소프트웨어이고, VM마다 게스트 커널을 따로 부팅한다.
 
-- 하이퍼바이저 가상화: 서비스마다 가짜 컴퓨터(VM)를 한 대씩 만들어 준다.
-- 컨테이너: 커널은 하나를 같이 쓰고, 프로세스마다 보이는 것과 쓰는 양만 나눈다.
-
-### 하이퍼바이저와 VM
-
-하이퍼바이저(hypervisor)는 CPU, 메모리, 디스크 같은 하드웨어를 VM 여러 대에 나눠 주는 소프트웨어다. VM마다 자기 커널을 따로 부팅하므로, VM 안의 프로그램은 서버 한 대를 통째로 가진 것처럼 돈다.
-
-- Type 1 (베어메탈): 하드웨어 위에 바로 설치한다. VMware ESXi, Hyper-V, Xen.
-- Type 2 (호스트형): 윈도우나 맥 같은 일반 OS 위에서 프로그램으로 돈다. VMware Workstation, VirtualBox.
-
-컨테이너는 커널을 하나만 둔다. 컨테이너 안의 프로세스도 호스트에서 보면 프로세스 하나이고, 커널이 그 프로세스에게 보여 줄 것(namespace)과 쓸 양(cgroup)만 따로 정한다.
-
-두 장면에서 앱이 파일을 읽을 때 요청이 디스크까지 몇 층을 지나는지 견줘 보자.
+컨테이너 런타임은 커널을 하나만 둔다. `clone(2)`에 `CLONE_NEWPID`, `CLONE_NEWNET` 같은 플래그를 붙여 프로세스를 만들고, 그 프로세스를 cgroup에 넣은 뒤 루트를 이미지의 파일로 바꾼다. 아래 그림처럼 파일 읽기 한 번이 게스트 커널과 하이퍼바이저 없이 호스트 커널로 바로 간다.
 
 <figure class="fig" data-figure="container-stack">
   <figcaption>파일 읽기 요청이 디스크까지 가는 길</figcaption>
 </figure>
 
-VM은 게스트 커널과 하이퍼바이저를 거쳐 디스크에 닿고, VM마다 커널과 OS가 메모리를 따로 차지한다. 컨테이너는 호스트 커널을 바로 부르니 중간 층이 없고, 뜨는 데도 프로세스 하나 띄우는 시간이면 된다.
+계산하는 명령은 CPU의 가상화 기능(Intel VT-x, AMD-V) 덕분에 VM 안에서도 CPU에서 바로 돈다. 두 방식의 차이는 I/O 경로, VM마다 따로 드는 커널 메모리, 뜨는 시간에서 난다. VM은 OS를 부팅하고 컨테이너는 프로세스 하나를 띄운다.
 
-그림은 I/O 경로만 보여 준다. 계산하는 명령은 요즘 CPU의 가상화 기능 덕분에 VM 안에서도 CPU에서 바로 돌아서, 두 방식의 차이는 주로 디스크와 네트워크 I/O, 그리고 커널을 따로 두는 메모리에서 난다.
+대가는 격리의 벽이다. 커널을 같이 쓰므로 커널 취약점 하나가 그 서버의 모든 컨테이너에 닿는다. 남이 올린 코드를 돌리는 곳은 컨테이너마다 경량 VM을 씌우는 Kata Containers나, 시스템 콜을 사용자 공간의 커널이 대신 받는 gVisor를 쓴다.
 
-대신 격리의 벽이 다르다. VM은 커널이 따로라 하나가 뚫려도 하이퍼바이저가 한 번 더 막지만, 컨테이너는 커널을 같이 쓰므로 커널 취약점 하나가 그 서버의 모든 컨테이너에 닿는다. 남이 올린 코드를 돌리는 환경처럼 벽이 중요한 곳은 VM이나 경량 VM(Kata Containers 등) 위에 컨테이너를 올린다.
+## 루트 파일 시스템 교체
 
-### 오버커밋
+컨테이너 안에서 `ls /`를 치면 호스트 디렉터리 대신 이미지의 파일만 보인다. 프로세스의 루트(/)를 다른 디렉터리로 바꿨기 때문이다.
 
-물리 코어가 4개인 서버에 vCPU 4개짜리 VM을 세 대 올리는 일이 흔하다. 오버커밋(overcommit)은 물리 자원보다 많은 양을 VM에 나눠 주는 방식이다.
-
-모든 VM이 한꺼번에 바쁜 일은 드물다는 데 기대어, 하이퍼바이저가 바쁜 vCPU에 물리 코어를 번갈아 붙인다. 몇 배까지 나눠 줄지는 정해진 값이 없고 운영자가 부하를 보고 정한다.
-
-두 장면에서 코어 4개의 시간축이 어떻게 차는지 지켜보자.
-
-<figure class="fig" data-figure="container-overcommit">
-  <figcaption>vCPU 12개를 물리 코어 4개에 나눠 붙이는 모습</figcaption>
-</figure>
-
-바쁜 때가 엇갈리면 코어 4개로 vCPU 12개가 모두 제때 돈다. 셋이 같이 바쁘면 각 VM은 시간의 3분의 1만 받고 나머지 3분의 2는 차례를 기다린다. VM 안의 리눅스는 이 시간을 steal로 센다.
-
-메모리도 오버커밋한다.
-
-- 같은 내용의 메모리 페이지를 VM끼리 하나로 합친다(리눅스 KSM 등).
-- 쓰지 않는 메모리를 압축하거나 디스크(스왑)로 내린다.
-- 게스트 안의 드라이버가 메모리를 잡아 하이퍼바이저에 돌려준다(벌루닝).
-
-메모리는 CPU처럼 차례를 기다려서 해결되지 않는다. 디스크로 내린 페이지를 다시 쓰려면 메모리보다 약 1000배 느린 SSD에서 읽어 와야 한다. VM 안에서 `top`의 `st` 값이 꾸준히 오르면 VM 설정보다 호스트의 오버커밋 비율부터 본다.
-
-## namespace
-
-### chroot와 pivot_root
-
-컨테이너 안에서 `ls /`를 치면 호스트의 디렉터리가 하나도 안 보인다. 컨테이너마다 루트(/)를 따로 갖기 때문이다.
-
-가장 오래된 방법은 chroot다. 프로세스의 루트를 `/srv/app` 같은 디렉터리로 바꾸면 그 프로세스에게는 그 아래만 보인다. 대신 bash, ls와 그 라이브러리처럼 실행에 필요한 파일을 그 안에 미리 넣어 둬야 한다.
+가장 오래된 방법은 `chroot(2)`다. 매뉴얼은 이 호출이 경로를 풀 때 쓰는 재료 하나를 바꿀 뿐 다른 일은 하지 않는다고 적고, 보안 목적으로 쓰지 말라고 경고한다. 안에서 돌릴 bash, ls와 그 라이브러리도 미리 넣어 둬야 한다.
 
 ```bash
 mkdir -p root-v1/bin root-v1/lib/x86_64-linux-gnu root-v1/lib64
@@ -74,134 +36,124 @@ ldd /bin/bash /bin/ls     # 필요한 라이브러리를 보고 같은 경로로
 chroot root-v1 /bin/bash
 ```
 
-chroot는 프로세스의 루트 표시만 바꾼다. root 권한이 있으면 안쪽 디렉터리로 chroot를 한 번 더 해서 빠져나갈 수 있다. 새 루트가 지금 위치보다 아래로 내려가니 지금 위치는 루트 밖에 남고, 거기서 `..`를 따라 올라가면 진짜 루트에 닿는다.
+빠져나갈 길은 chroot가 현재 디렉터리(cwd)를 바꾸지 않는 데서 생긴다. `CAP_SYS_CHROOT` 권한이 있는 프로세스가 안쪽 디렉터리로 chroot를 한 번 더 하면, 지금 있는 디렉터리가 새 루트 바깥에 남는다. 거기서 `..`를 따라 올라가면 루트 검사에 걸리지 않고 진짜 /에 닿는다.
 
-pivot_root는 mount namespace 안에서 루트 파일 시스템 자체를 바꾼다. 새 루트를 /로 올리고 옛 루트를 그 아래 `put_old`로 옮긴 뒤, 그 마운트를 떼어 낸다.
+```c
+mkdir(".out", 0755);
+chroot(".out");              // 루트만 안쪽으로 옮기고 cwd는 바깥에 둔다
+chdir("../../../../..");     // 새 루트를 지나치지 않으니 진짜 /까지 오른다
+chroot(".");
+execl("/bin/sh", "sh", NULL);
+```
+
+`pivot_root(2)`는 경로의 출발점이 아니라 mount namespace의 루트 마운트 자체를 바꾼다. 새 루트를 /로 올리고 옛 루트를 그 아래 `put_old`로 내린 뒤 떼어 내면, 위로 올라갈 마운트가 남지 않는다. 새 루트는 마운트 지점이어야 하고, 호출에는 `CAP_SYS_ADMIN`이 필요하다.
 
 ```bash
 unshare --mount /bin/bash                  # 새 mount namespace
 mount -t tmpfs -o size=10M none root-v2    # 새 루트는 마운트 지점이어야 한다
 cp -a root-v1/. root-v2/ && mkdir root-v2/put_old
 cd root-v2 && pivot_root . put_old
-umount -l /put_old                         # 새 루트에 umount도 넣어 둔다
+umount -l /put_old                         # 옛 루트를 떼어 낸다
 ```
 
-두 장면에서 bash가 `..`를 따라 어디까지 올라가는지 지켜보자.
+아래 그림처럼 chroot는 출발점만 옮겨서 위로 가는 길이 남고, pivot_root는 옛 루트를 떼어 내서 길 자체를 없앤다.
 
 <figure class="fig" data-figure="container-root">
   <figcaption>chroot와 pivot_root에서 위로 올라가는 길</figcaption>
 </figure>
 
-chroot는 벽을 세우지 않고 출발점만 옮겨서 위로 가는 길이 남는다. pivot_root는 옛 루트를 떼어 내서 길 자체를 없앤다. runc 같은 컨테이너 런타임도 pivot_root로 루트를 바꾸고 옛 루트를 떼어 낸다.
+runc도 같은 순서를 밟는다. 새 루트로 옮긴 뒤(`pivot_root`) 옛 루트를 떼어 내는데(`umount2`), 그 전에 옛 루트에서 일어나는 마운트 변화가 호스트 쪽으로 번지지 않게 연결을 끊어 둔다. 끊지 않으면 컨테이너 안에서 뗀 마운트가 호스트에서도 떨어질 수 있다.
 
-떼어 낸 루트도 다시 마운트할 권한이 있으면 되살릴 수 있다. `--privileged`나 `CAP_SYS_ADMIN`을 받은 컨테이너는 이 권한을 가지므로, 이런 옵션이 붙은 컨테이너부터 찾아본다.
+떼어 낸 루트도 다시 마운트할 수 있으면 되살아난다. `--privileged` 컨테이너는 호스트의 디스크 장치가 보이고 mount도 부를 수 있어서 호스트 파일 시스템을 다시 붙일 수 있다.
 
-### namespace 종류
+## namespace
 
-컨테이너 안에서 `ps`를 치면 앱이 PID 1이다. 호스트에서 보면 같은 프로세스가 PID 4321이다.
+루트를 바꿔도 `ps`, `ip addr`, `hostname`은 여전히 호스트를 보여 준다. 프로세스 번호나 네트워크 장치는 파일이 아니라 커널 자원이기 때문이다. namespace는 커널 자원 하나를 프로세스 묶음마다 따로 보이게 하고, 리눅스에는 8가지가 있다.
 
-namespace는 커널 자원 하나를 프로세스 묶음마다 따로 보이게 한다. 리눅스에는 8가지가 있고, Docker와 쿠버네티스는 보통 user와 time을 뺀 나머지를 새로 만든다. 쿠버네티스는 그중 network, ipc, uts를 파드 단위로 만든다.
+- mnt: 마운트 목록. 앞 절의 pivot_root가 이 안에서 일어난다.
+- uts: 호스트 이름.
+- ipc: 공유 메모리와 메시지 큐.
+- pid: 프로세스 번호.
+- net: 네트워크 장치, IP, 라우팅 표, 포트.
+- user: UID와 GID.
+- cgroup: 자기 cgroup 경로가 /로 보인다.
+- time: 부팅 후 시간. 리눅스 5.6부터 있다.
 
-| namespace | 따로 보이는 것 | 컨테이너 안에서 |
-|---|---|---|
-| mnt | 마운트 목록 | 이미지의 파일 시스템이 /로 보인다 |
-| uts | 호스트 이름 | `hostname`이 호스트와 다르다 |
-| ipc | 공유 메모리, 메시지 큐 | 호스트의 `ipcs` 목록이 안 보인다 |
-| pid | 프로세스 번호 | 앱이 PID 1이다 |
-| net | 네트워크 장치, IP, 라우팅 표, 방화벽 규칙, 포트 | eth0와 IP가 따로라 같은 포트를 여럿이 연다 |
-| user | UID, GID | 안의 root가 밖에서는 일반 사용자다 |
-| cgroup | cgroup 경로 | 자기 cgroup이 /로 보인다 |
-| time | 부팅 후 시간 (리눅스 5.6부터) | 시계를 따로 둔다 |
+다루는 시스템 콜은 셋이다.
 
-세 장면에서 같은 프로세스와 같은 패킷이 호스트와 컨테이너 안에서 어떻게 다르게 보이는지 본다.
+- `clone(2)`: `CLONE_NEW*` 플래그를 주면 새 namespace를 만들고 자식을 그 안에 낳는다.
+- `unshare(2)`: 부른 프로세스 자신을 새 namespace로 옮긴다.
+- `setns(2)`: `/proc/<pid>/ns/` 아래 파일을 열어 이미 있는 namespace에 들어간다.
+
+namespace는 `/proc/<pid>/ns/net` 같은 링크로 보이고, `net:[4026532301]`의 번호가 같으면 같은 namespace다. 보통은 마지막 프로세스가 나가면 사라지지만, 이 파일을 열어 두거나 다른 경로에 바인드 마운트하면 프로세스 없이도 남는다. `ip netns add`가 만든 이름 있는 network namespace가 이렇게 남는다.
+
+```bash
+lsns                           # 호스트의 namespace 목록과 첫 프로세스
+readlink /proc/4321/ns/net     # net:[4026532301]
+nsenter -t 4321 -n ip addr     # 4321의 network namespace에서 호스트의 ip 명령 실행
+```
+
+아래 그림처럼 같은 프로세스, 같은 패킷, 같은 사용자가 호스트와 컨테이너 안에서 다른 번호와 장치로 보인다.
 
 <figure class="fig" data-figure="container-ns">
   <figcaption>호스트와 컨테이너가 같은 것을 다르게 보는 모습</figcaption>
 </figure>
 
-PID 4321과 PID 1은 같은 프로세스이고, 컨테이너 eth0는 veth 한 쌍과 브리지로 호스트 eth0에 이어진 별도 장치다. user namespace를 켜면 컨테이너 안의 root가 호스트에서는 100000번 같은 권한 없는 사용자로 바뀌어, 밖으로 빠져나와도 호스트 파일을 고치지 못한다.
+PID namespace의 첫 프로세스는 그 안에서 PID 1이 되고 init의 규칙을 떠안는다.
 
-namespace는 보이는 것만 바꾸고 자원의 양은 나누지 않는다. 컨테이너 프로세스도 호스트 커널이 다른 프로세스와 똑같이 스케줄링한다.
+- 바깥에서 보낸 신호는 PID 1이 핸들러를 등록한 것만 닿는다. SIGKILL과 SIGSTOP만 예외다. 핸들러 없는 앱은 `docker stop`의 SIGTERM을 무시하고, 기본 10초 뒤 SIGKILL로 끝난다.
+- 부모를 잃은 프로세스는 PID 1의 자식이 되므로, PID 1이 이들을 거둬야(wait) 좀비가 쌓이지 않는다.
+- PID 1이 끝나면 커널이 namespace 안의 나머지 프로세스에 SIGKILL을 보낸다. 컨테이너의 수명이 첫 프로세스의 수명과 같은 이유다.
 
-쿠버네티스에서 user namespace는 1.36부터 정식 기능이다. 파드에 `hostUsers: false`를 적어 켜고, 노드에는 리눅스 6.3 이상과 containerd 2.0이나 CRI-O 1.25 이상이 필요하다.
+앱이 신호를 직접 다루지 않으면 `docker run --init`으로 작은 init(tini)을 PID 1에 두고 앱을 그 자식으로 띄운다.
 
-```bash
-lsns                           # 호스트의 namespace 목록과 첫 프로세스
-readlink /proc/4321/ns/net     # net:[4026532301] 번호가 같으면 같은 namespace
-nsenter -t 4321 -n ip addr     # 4321의 network namespace에 들어가 명령 실행
-```
+user namespace는 안의 UID를 밖의 다른 UID로 옮겨 적는다(`/proc/<pid>/uid_map`). 안에서 root(UID 0)인 프로세스가 호스트에서는 UID 100000 같은 권한 없는 사용자라, 루트를 빠져나와도 호스트 파일을 고치지 못한다. Docker와 쿠버네티스는 이 namespace를 기본으로 만들지 않아서, 따로 켜지 않으면 컨테이너의 root는 호스트의 root다.
 
-컨테이너 이미지에 디버깅 도구가 없으면, 호스트에서 `nsenter`로 그 namespace에 들어가 호스트의 도구로 본다.
+namespace는 나눠 갖기도 한다. 쿠버네티스 파드 안 컨테이너는 network, ipc, uts namespace를 같이 쓴다. containerd는 작은 pause 컨테이너를 먼저 띄워 이 namespace를 잡아 두고, 앱 컨테이너를 그 안으로 들여보낸다. CRI-O는 기본값(`drop_infra_ctr=true`)에서 파드 단위 PID namespace를 쓰지 않으면 pause 컨테이너를 띄우지 않고, pinns라는 작은 도구로 namespace 파일을 바인드 마운트해 남겨 둔다. 사이드카가 앱에 `localhost:8080`으로 붙는 이유다.
+
+namespace는 보이는 것만 나누고 양은 나누지 않는다. 컨테이너 프로세스도 호스트의 CPU와 메모리를 다른 프로세스와 똑같이 나눠 쓰므로, 한 컨테이너가 메모리를 다 쓰면 옆 컨테이너도 같이 모자란다.
 
 ## cgroup
 
-### cgroup 구조
-
-같은 노드의 배치 파드가 메모리를 마구 쓰는데도 API 파드는 멀쩡하다. 파드마다 cgroup으로 쓸 양에 상한을 걸어 두었기 때문이다.
-
-cgroup(control group)은 프로세스 묶음이 쓰는 CPU, 메모리, 디스크 I/O, 프로세스 수를 재고 제한한다. 커널은 이것을 `/sys/fs/cgroup` 아래 디렉터리와 파일로 보여 준다. 디렉터리 하나가 cgroup 하나이고, 그 안의 파일에 값을 쓰면 제한이 걸린다.
+cgroup(control group)은 프로세스 묶음이 쓰는 CPU, 메모리, I/O, 프로세스 수를 재고 막는다. 커널은 이것을 `/sys/fs/cgroup`에 붙은 가상 파일 시스템(cgroup2)으로 보여 준다. 디렉터리 하나가 cgroup 하나이고, 하위 디렉터리를 만들면 자식 cgroup이 되며, 그 안의 파일에 값을 쓰면 제한이 걸린다.
 
 ```bash
 mkdir /sys/fs/cgroup/demo
 echo 512M > /sys/fs/cgroup/demo/memory.max            # 메모리 상한
 echo "30000 100000" > /sys/fs/cgroup/demo/cpu.max     # 100ms마다 30ms
+echo 100 > /sys/fs/cgroup/demo/pids.max               # 프로세스 100개까지
 echo $$ > /sys/fs/cgroup/demo/cgroup.procs            # 지금 셸을 넣는다
 ```
 
-쿠버네티스에서는 kubelet과 containerd가 이 일을 한다. 파드 하나에 cgroup이 생기는 순서를 따라가 보자.
+PID를 `cgroup.procs`에 쓰면 그 프로세스의 스레드가 전부 옮겨 가고, 이후 fork한 자식은 부모의 cgroup에서 태어난다. 런타임이 첫 프로세스 하나만 넣어도 컨테이너 안에서 생기는 프로세스가 모두 같은 상한을 받는다. 쿠버네티스 파드 스펙의 limit도 kubelet과 containerd가 이 파일에 쓰는 값이다. 아래 그림처럼 디렉터리를 만들고, 상한을 쓰고, PID를 넣으면 그때부터 커널이 그 프로세스의 사용량을 그 cgroup에 합산한다.
 
 <figure class="fig" data-figure="container-cgroup">
   <figcaption>kubelet과 런타임이 컨테이너 하나에 cgroup을 만드는 순서</figcaption>
 </figure>
 
-디렉터리를 만들고, 상한을 쓰고, PID를 넣으면 그 프로세스와 자식 프로세스가 쓰는 양을 커널이 그 cgroup에 합산한다. 파드 스펙의 limit은 이 파일 값으로 들어간다.
+cgroup v2에서 프로세스는 맨 아래 cgroup에만 둔다. 자원을 자식에게 나눠 주는 중간 cgroup은 자기 프로세스를 가질 수 없다는 규칙이 있어서, 노드에는 `kubepods.slice` 아래 파드 cgroup, 그 아래 컨테이너 cgroup이 생기고 프로세스는 컨테이너 cgroup에만 들어간다. 부모의 상한은 자식 전체에 걸리므로 파드 cgroup의 상한이 컨테이너들의 합을 한 번 더 막는다.
 
-CPU 쪽 값(`cpu.max`, `cpu.weight`)과 쓰로틀링은 [CPU 이해하기]({{ '/2026/10/25/k8s-cpu-request-limit/' | relative_url }})에서 다뤘다. 여기서는 메모리를 본다.
+- `cpu.max`: `$MAX $PERIOD` 꼴이고 기본값은 `max 100000`(상한 없음, 주기 100ms)이다. `30000 100000`이면 100ms마다 30ms만 돌고, 다 쓰면 다음 주기까지 멈춘다. 쓰로틀링은 [CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %})에 정리했다.
+- `pids.max`: 프로세스 수 상한. 넘는 `fork`와 `clone`을 거절해서, fork 폭탄이 메모리 상한에 닿기 전에 노드의 PID를 바닥내는 것을 막는다.
 
-cgroup에는 v1과 v2가 있다. v1은 `cpu`, `memory`처럼 자원마다 트리가 따로였고, v2는 트리 하나에 자원별 파일이 모여 있다. 요즘 배포판은 v2가 기본이고, 노드가 어느 쪽인지는 이렇게 본다.
+메모리 상한(`memory.max`)에 닿을 때의 회수와, 그 cgroup 안에서만 일어나는 OOM kill은 [메모리 이해하기]({{ site.baseurl }}{% post_url 2026-10-26-memory %})에 정리했다.
 
-```bash
-stat -fc %T /sys/fs/cgroup     # cgroup2fs면 v2, tmpfs면 v1
-```
+## 이미지 레이어와 OverlayFS
 
-### memory limit과 OOM
+namespace와 cgroup으로 보이는 것과 쓰는 양은 나눴다. 남은 것은 pivot_root로 올릴 새 루트에 깔 파일이다. OS 파일과 앱을 컨테이너마다 통째로 복사하면 백 개에 백 벌이 들므로, 이미지는 변경분(레이어)을 쌓은 묶음으로 두고 컨테이너는 그 위에 얇은 쓰기 층 하나만 얹는다.
 
-배치 파드 하나에 메모리 누수가 생겼다. limit이 있으면 그 파드만 재시작되고, 없으면 같은 노드의 API까지 느려진다.
+OCI 이미지 명세에서 레이어는 파일 시스템 변경분을 담은 tar 파일이다. 더하거나 고친 파일은 그대로 넣고, 지운 파일은 이름 앞에 `.wh.`를 붙인 빈 파일(화이트아웃, whiteout)로 적는다. 레이어 하나의 이름은 압축을 푼 tar의 sha256(DiffID)이다.
 
-`memory.max`에 닿으면 커널은 먼저 그 cgroup의 페이지 캐시처럼 비울 수 있는 메모리를 회수한다. 그래도 모자라면 그 cgroup 안에서만 프로세스 하나를 골라 죽인다(OOM kill). 쿠버네티스는 이것을 `OOMKilled`로 보여 주고 컨테이너를 다시 띄운다.
-
-아래 데모에서 A의 메모리를 새게 해 보자. 모드를 바꿔 가며 A가 늘어나는 동안 B의 응답 시간이 어떻게 되는지 본다.
-
-<figure class="fig" data-figure="container-oom">
-  <figcaption>4GiB 노드에서 메모리가 새는 파드 A와 옆 파드 B (모양을 보여 주는 예시)</figcaption>
-</figure>
-
-limit이 없으면 A가 노드의 남은 메모리를 다 가져간다. 노드가 메모리를 회수하느라 B의 요청까지 느려지고, 끝내 커널 OOM killer나 kubelet의 축출(eviction)이 노드 전체에서 대상을 고른다.
-
-limit 1GiB를 걸면 A는 1GiB에서 혼자 OOMKilled되고 다시 뜬다. 새는 양과 속도는 같고, 바뀐 것은 **터지는 범위** 하나다.
+디스크에 풀어 둔 레이어는 DiffID가 아니라 아래 레이어까지 이어 계산한 ChainID로 구분한다. 같은 변경분이라도 깔린 바닥이 다르면 결과 파일 시스템이 다르기 때문이다. DiffID가 같아도 아래 레이어가 다르면 따로 저장되고, 베이스부터 같은 레이어를 쌓은 이미지끼리만 디스크를 나눠 쓴다.
 
 ```text
-$ cat /sys/fs/cgroup/memory.events     # 컨테이너 안에서
-low 0
-high 0
-max 1287
-oom 4
-oom_kill 4
+ChainID(L0)    = DiffID(L0)
+ChainID(L0|L1) = sha256(ChainID(L0) + " " + DiffID(L1))
 ```
 
-재시작이 잦은 파드는 `kubectl describe pod`의 Last State에서 OOMKilled부터 보고, `memory.events`의 `oom_kill`로 횟수를 확인한다. memory는 request와 limit을 같게 두는 편이 안전하다는 점도 [CPU 이해하기]({{ '/2026/10/25/k8s-cpu-request-limit/' | relative_url }}) 끝에 적어 두었다.
+Docker의 `/var/lib/docker/image/overlay2/layerdb/sha256/` 아래 디렉터리 이름이 이 ChainID이고, 그 안의 `diff` 파일에 DiffID가, `parent` 파일에 아래 레이어의 ChainID가 들어 있다.
 
-## 이미지와 파일 시스템
-
-### 이미지 레이어
-
-500MB짜리 이미지를 고쳐 다시 올렸는데 푸시가 몇 초 만에 끝난다. 바뀐 레이어만 올라가기 때문이다.
-
-이미지는 파일 시스템 한 덩어리가 아니라 변경분(레이어)을 쌓은 묶음이다. 레이어마다 내용의 sha256 값이 이름이라, 같은 내용이면 같은 레이어로 본다.
-
-- `RUN`, `COPY`, `ADD`처럼 파일 시스템을 바꾸는 명령이 레이어를 하나씩 만든다.
-- `CMD`, `ENV`, `LABEL`은 설정만 바꾸고 레이어를 만들지 않는다.
-- `FROM`은 베이스 이미지의 레이어를 그대로 가져온다.
+Dockerfile에서는 `RUN`, `COPY`, `ADD`가 레이어를 하나씩 만들고 `CMD`, `ENV`는 설정만 바꾼다. 아래 그림처럼 베이스가 같은 이미지 둘은 베이스 레이어를 디스크에 한 벌만 둔다.
 
 ```dockerfile
 FROM node:22-slim
@@ -211,157 +163,98 @@ COPY . /app/
 CMD node /app/server.js
 ```
 
-두 장면에서 명령마다 레이어가 쌓이는 모습과, 이미지 둘이 베이스 레이어를 같이 쓰는 모습을 본다.
-
 <figure class="fig" data-figure="container-layers">
   <figcaption>Dockerfile 명령마다 쌓이는 레이어 (크기는 예시)</figcaption>
 </figure>
 
-같은 베이스로 만든 이미지 열 개는 베이스 레이어를 디스크에 한 벌만 둔다. 레지스트리에 올리고 내려받을 때도 이미 있는 레이어는 건너뛴다.
+빌드 캐시도 레이어 단위로 맞춘다. 어떤 명령의 입력이 바뀌면 그 레이어와 위의 레이어를 전부 다시 만들기 때문에, 위처럼 `package.json`을 먼저 복사해 `npm ci`를 돌리면 소스만 고쳤을 때 의존성 설치를 건너뛴다.
 
-```bash
-docker image inspect node:22-slim | jq '.[0].RootFS.Layers'   # 레이어 sha256 목록
-docker history node:22-slim                                    # 명령별 레이어와 크기
-```
+레이어를 겹쳐 하나의 /로 보여 주는 일은 커널의 OverlayFS가 한다.
 
-### 빌드 캐시
-
-소스 한 줄을 고쳤을 뿐인데 빌드할 때마다 `npm ci`가 처음부터 다시 돈다.
-
-빌드 캐시는 레이어를 아래부터 차례로 맞춰 본다. 어떤 명령의 입력(명령 문자열, 복사하는 파일)이 바뀌면 그 레이어와 그 위의 레이어를 전부 다시 만든다.
-
-두 장면은 같은 소스 수정을 Dockerfile 순서만 바꿔 빌드한다. 어느 줄에서 다시 실행이 시작되는지 본다.
-
-<figure class="fig" data-figure="container-cache">
-  <figcaption>소스 한 줄을 고친 뒤 다시 빌드하는 시간 (시간은 예시)</figcaption>
-</figure>
-
-소스를 먼저 복사하면 소스가 바뀔 때마다 그 위의 `npm ci`도 다시 돈다. `package.json`만 먼저 복사해 의존성을 설치하면, 소스가 바뀌어도 마지막 `COPY`만 다시 한다.
-
-자주 바뀌는 파일일수록 Dockerfile 아래쪽에서 복사한다.
-
-### overlayfs
-
-컨테이너 안에서 `/etc/nginx/nginx.conf`를 고쳐도 이미지는 그대로이고, 같은 이미지로 띄운 다른 컨테이너에는 반영되지 않는다.
-
-OverlayFS는 여러 디렉터리를 겹쳐 하나로 보여 주는 리눅스 파일 시스템이다. 같은 이름의 파일이 여러 층에 있으면 위층 것이 보인다.
-
-- lowerdir: 이미지 레이어들. 읽기 전용이다.
+- lowerdir: 이미지 레이어들. 읽기 전용이고, 콜론으로 여럿을 적으면 왼쪽이 위층이다.
 - upperdir: 컨테이너마다 하나씩 생기는 쓰기 층.
-- merged: 둘을 겹쳐 보여 주는 곳. 컨테이너의 /가 여기다.
+- workdir: copy-up 중간 파일을 두는 곳. upperdir와 같은 파일 시스템이어야 한다.
+- merged: 겹쳐 보이는 결과. 컨테이너의 /가 여기다.
 
-세 장면에서 파일을 읽고, 고치고, 지울 때 어느 층이 바뀌는지 지켜보자.
+같은 이름이 여러 층에 있으면 위층 것이 보인다. 아래 그림처럼 읽을 때는 위층부터 찾아 내려가고, 고치면 파일을 위층으로 복사(copy-up)한 뒤 바꾸고, 지우면 위층에 화이트아웃을 만든다.
 
 <figure class="fig" data-figure="container-overlay">
   <figcaption>읽기, 고치기, 지우기에서 OverlayFS 세 층</figcaption>
 </figure>
 
-고치면 파일이 upperdir로 복사(copy-up)된 뒤 바뀌고, 지우면 upperdir에 화이트아웃(whiteout)이라는 표시가 생겨 아래 파일을 가린다. 어느 경우에도 lowerdir는 그대로라서, 같은 이미지로 띄운 컨테이너 백 개가 레이어 한 벌을 같이 쓴다.
+OverlayFS의 화이트아웃은 장치 번호가 0/0인 문자 장치 파일이고, 디렉터리를 통째로 가릴 때는 `trusted.overlay.opaque` 속성을 단다. lowerdir는 어느 경우에도 바뀌지 않아서 컨테이너 백 개가 레이어 한 벌을 같이 읽는다.
 
-이미지를 만들 때도 같다. 앞 레이어에서 받은 파일을 다음 `RUN`에서 지우면 화이트아웃 레이어가 하나 더 쌓일 뿐 이미지는 줄지 않는다. 받은 파일은 같은 `RUN` 안에서 지운다.
+Docker의 overlay2 드라이버는 레이어마다 `/var/lib/docker/overlay2/<id>/`를 두고, 그 안에 내용(`diff`), 아래 레이어 목록(`lower`), 짧은 이름(`link`)을 둔다. 짧은 이름의 링크는 `l/` 디렉터리에 모아 두는데, lowerdir 경로를 줄여 mount 인자가 페이지 크기를 넘지 않게 하려는 것이다. overlay2는 lower 층을 128개까지 쌓는다.
+
+```text
+$ docker info
+ Storage Driver: overlay2
+ Docker Root Dir: /var/lib/docker
+$ ls /var/lib/docker/overlay2/<id>
+committed  diff  link  lower  work
+$ mount -t overlay
+overlay on /var/lib/docker/overlay2/<id>/merged type overlay
+  (rw,lowerdir=l/K3TQ...:l/ZQ7M...,upperdir=<id>/diff,workdir=<id>/work)
+```
+
+이미지를 만들 때도 같은 규칙이 걸린다. 앞 레이어에서 받은 파일을 다음 `RUN`에서 지우면 화이트아웃 레이어가 하나 더 쌓일 뿐 아래 레이어의 파일은 그대로라, 이미지가 줄지 않는다. 받은 파일은 같은 `RUN` 안에서 지운다.
 
 ```dockerfile
 RUN curl -fsSLO https://example.com/tool.tar.gz \
  && tar xzf tool.tar.gz && rm tool.tar.gz
 ```
 
-Docker는 이 일을 스토리지 드라이버에 맡긴다.
+## copy-up과 볼륨
 
-- overlay2: 커널 OverlayFS를 쓰는 Docker의 기본 드라이버다. aufs와 옛 overlay 드라이버는 Docker 24.0에서, devicemapper는 25.0에서 빠졌다.
-- containerd 이미지 저장소: Docker 29.0부터 새로 설치하면 기본이다. 겹치는 방식은 containerd의 overlayfs snapshotter로 같다.
-- 쿠버네티스 노드의 containerd도 overlayfs snapshotter가 기본이다.
+레이어를 고치지 않는 대가는 쓰기에서 치른다. OverlayFS는 블록이 아니라 파일 단위로 동작해서, 2GB 파일의 한 바이트를 고쳐도 처음 한 번은 2GB를 통째로 upperdir에 복사한 뒤에 쓴다. 두 번째 쓰기부터는 위층 파일에 바로 쓴다.
 
-노드에서 컨테이너 하나의 세 층은 마운트 옵션에 그대로 보인다(경로는 줄였다).
+chmod나 chown처럼 속성만 바꿀 때는 `metacopy=on` 옵션이 속성만 위로 올리고, 내용 복사는 파일을 쓰려고 열 때로 미룬다. 내용을 고치는 쓰기는 이 옵션이 있어도 통째로 복사한다.
 
-```text
-$ mount -t overlay
-overlay on /run/containerd/.../rootfs type overlay
-  (rw,lowerdir=.../snapshots/12/fs:.../snapshots/11/fs,upperdir=.../snapshots/40/fs,workdir=.../snapshots/40/work)
-```
-
-### copy-on-write
-
-DB 파일을 컨테이너 안 경로에 그냥 두고 돌렸더니, 컨테이너를 띄우고 처음 쓰는 순간 몇 초씩 멈춘다.
-
-copy-up은 파일 단위로 일어난다. 2GB 파일의 한 바이트를 고쳐도 처음 한 번은 2GB를 통째로 upperdir에 복사한 뒤에 쓴다. 두 번째 쓰기부터는 이미 위층에 있으니 바로 쓴다.
-
-모드를 바꿔 가며 한 줄 고치기를 눌러 보자. 쓰기가 시작되기 전에 복사가 얼마나 걸리는지 본다.
+아래 데모에서 4KB 설정 파일과 2GB DB 파일을 골라 한 줄 고치기를 누르고, 쓰기가 시작되기까지 걸리는 시간을 비교한다.
 
 <figure class="fig" data-figure="container-cow">
   <figcaption>이미지 안의 파일을 처음 고칠 때 (복사 시간은 디스크 1GB/s를 가정한 대략값)</figcaption>
 </figure>
 
-4KB 설정 파일은 복사가 1ms도 걸리지 않아 차이가 없다. 2GB 파일은 약 2초를 복사에 쓰고 그동안 쓰기가 멈추며, 디스크도 2GB를 더 쓴다. 고친 내용은 한 바이트로 같고 복사할 파일 크기만 다르다.
+4KB 파일은 복사가 1ms 안에 끝나 차이가 없다. 2GB 파일은 디스크가 초당 약 1GB를 쓴다고 보면 2초쯤(대략값) 복사에 쓰는 동안 첫 쓰기가 기다린다. 디스크도 2GB를 더 차지한다. 고친 양은 같고 복사할 파일 크기만 다르다.
 
-크고 자주 쓰는 파일(DB, 로그, 업로드)은 이미지 층이 아니라 볼륨에 둔다.
+upperdir는 수명에도 한계가 있다. 컨테이너와 함께 생기고 `docker rm`과 함께 지워지므로, 새 버전으로 바꾸면 그 안에 쓴 파일이 사라진다.
 
-### 볼륨
-
-새 버전을 배포했더니 사용자가 올린 파일이 전부 사라졌다. 파일이 컨테이너의 upperdir에 있었기 때문이다.
-
-upperdir는 컨테이너와 함께 생기고 함께 지워진다. 볼륨(volume)은 호스트의 디렉터리나 디스크를 컨테이너 경로에 직접 마운트한 것이라, OverlayFS를 거치지 않고 컨테이너가 지워져도 남는다.
-
-모드를 바꿔 가며 새 버전으로 교체를 눌러 보자. 교체 뒤에 파일 세 개가 어디에 남는지 본다.
-
-<figure class="fig" data-figure="container-volume">
-  <figcaption>컨테이너를 새 버전으로 바꿀 때 파일이 남는 곳</figcaption>
-</figure>
-
-컨테이너 레이어에 둔 파일은 옛 컨테이너와 함께 사라지고, 볼륨에 둔 파일은 새 컨테이너에 그대로 붙는다. 바뀐 것은 저장 위치 하나다. 볼륨은 copy-up도 없어서 쓰기도 빠르다.
+볼륨(volume)은 호스트의 디렉터리나 디스크를 컨테이너 경로에 직접 마운트한 것이다. 스토리지 드라이버를 거치지 않으니 copy-up이 없고, 컨테이너를 지워도 남는다. Docker 문서도 쓰기가 많은 작업에는 볼륨이 가장 빠르고 예측 가능하다고 권한다.
 
 ```bash
-docker run -v uploads:/data myapp:2.0    # 이름 있는 볼륨을 /data에 붙인다
-docker diff <컨테이너>                    # upperdir에 생긴 변경 목록
-docker ps -s                             # SIZE는 upperdir, virtual은 이미지까지 합친 크기
+docker run -v pgdata:/var/lib/postgresql/data postgres:17   # 이름 있는 볼륨
+docker diff <컨테이너>    # upperdir의 변경 목록 (A 추가, C 변경, D 삭제)
+docker ps -s             # SIZE는 upperdir, virtual은 이미지까지 합친 크기
 ```
 
-쿠버네티스에서는 파드와 함께 사라져도 되는 임시 파일은 `emptyDir`, 남아야 하는 데이터는 PersistentVolumeClaim으로 붙인다. 운영 중인 컨테이너는 `docker diff`로 upperdir에 쌓이는 파일부터 보고, 남아야 할 것이 있으면 볼륨으로 옮긴다.
-
-## 쿠버네티스의 파드
-
-### 파드와 namespace 공유
-
-사이드카 컨테이너가 앱 컨테이너에 `localhost:8080`으로 붙는다. 컨테이너는 둘인데 네트워크는 하나다.
-
-파드는 namespace 일부를 같이 쓰는 컨테이너 묶음이다. containerd와 CRI-O는 파드를 만들 때 작은 pause 컨테이너를 먼저 띄워 network, ipc, uts namespace를 잡아 두고, 앱 컨테이너들을 그 namespace에 넣는다.
-
-두 장면에서 파드 안 컨테이너가 같이 쓰는 것과 따로 쓰는 것을 본다.
-
-<figure class="fig" data-figure="container-pod">
-  <figcaption>파드 안 컨테이너가 같이 쓰는 network namespace와 따로 쓰는 cgroup</figcaption>
-</figure>
-
-network namespace가 하나라서 파드 안 컨테이너들은 IP 하나를 같이 쓰고, 같은 포트를 둘이 동시에 열 수 없다. 파일 시스템과 cgroup은 컨테이너마다 따로라, app이 memory limit에 걸려 재시작돼도 사이드카는 그대로 돈다.
-
-PID namespace는 기본으로 따로다. 사이드카가 앱 프로세스를 보거나 신호를 보내야 하면 파드에 `shareProcessNamespace: true`를 준다.
+쿠버네티스에서는 파드와 함께 사라져도 되는 임시 파일은 `emptyDir`, 남아야 하는 데이터는 PersistentVolumeClaim으로 붙인다. DB, 로그, 업로드처럼 크고 자주 쓰는 파일은 처음부터 볼륨 경로에 두고, 운영 중인 컨테이너는 `docker diff`로 upperdir에 쌓이는 파일이 없는지 본다.
 
 ## 정리
 
-| | 하는 일 | 기억할 점 |
-|---|---|---|
-| VM | 하드웨어를 나눠 커널을 따로 둔다 | 벽이 두껍고 무겁다. 오버커밋이 넘치면 steal |
-| 컨테이너 | 커널 하나를 같이 쓰는 프로세스 | 커널 취약점은 모든 컨테이너에 닿는다 |
-| pivot_root | 루트를 바꾸고 옛 루트를 떼어 낸다 | chroot는 빠져나갈 수 있다 |
-| namespace | 보이는 것을 나눈다 | 자원의 양은 나누지 않는다 |
-| cgroup | 쓰는 양을 재고 막는다 | memory.max에 닿으면 그 컨테이너만 OOM |
-| 이미지 레이어 | 변경분을 쌓는다 | 다음 레이어에서 지워도 줄지 않는다. 자주 바뀌는 건 아래에 |
-| OverlayFS | 레이어를 겹쳐 하나로 보여 준다 | 처음 고칠 때 파일을 통째로 copy-up |
-| 볼륨 | 호스트 저장소를 직접 마운트 | 남아야 하거나 자주 쓰는 데이터는 여기에 |
-| 파드 | network, ipc, uts를 같이 쓴다 | 파일 시스템과 cgroup은 컨테이너마다 |
+- 컨테이너는 커널 하나를 같이 쓰는 프로세스다. VM보다 가볍지만 커널 취약점은 모든 컨테이너에 닿는다.
+- chroot는 경로의 출발점만 바꿔 cwd로 빠져나갈 길이 남는다. pivot_root는 mount namespace의 루트를 바꾸고 옛 루트를 떼어 낸다.
+- namespace는 프로세스 번호, 네트워크, 호스트 이름 같은 커널 자원을 따로 보이게 한다. PID 1은 핸들러 없는 신호를 받지 않고, 끝나면 namespace 전체가 끝난다.
+- cgroup은 디렉터리 하나에 프로세스를 묶어 쓰는 양을 막고, fork한 자식은 부모의 cgroup을 물려받는다.
+- 이미지는 읽기 전용 레이어를 쌓은 것이고 디스크에서는 아래 레이어까지 포함한 ChainID로 구분된다. OverlayFS가 컨테이너마다 쓰기 층 하나를 얹어 겹쳐 보여 준다.
+- 쓰기는 파일 단위 copy-up을 치르고 upperdir는 컨테이너와 함께 지워진다. 크고 자주 쓰는 데이터는 볼륨에 둔다.
 
 ## 참고
 
 - [namespaces(7)](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+- [pid_namespaces(7)](https://man7.org/linux/man-pages/man7/pid_namespaces.7.html)
+- [user_namespaces(7)](https://man7.org/linux/man-pages/man7/user_namespaces.7.html)
 - [chroot(2)](https://man7.org/linux/man-pages/man2/chroot.2.html)
 - [pivot_root(2)](https://man7.org/linux/man-pages/man2/pivot_root.2.html)
+- [runc — libcontainer/rootfs_linux.go](https://github.com/opencontainers/runc/blob/main/libcontainer/rootfs_linux.go)
 - [Linux kernel — Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
 - [Linux kernel — Overlay Filesystem](https://docs.kernel.org/filesystems/overlayfs.html)
-- [Docker — Storage drivers](https://docs.docker.com/engine/storage/drivers/)
-- [Docker — Select a storage driver](https://docs.docker.com/engine/storage/drivers/select-storage-driver/)
-- [Docker — Deprecated Engine features](https://docs.docker.com/engine/deprecated/)
+- [OCI Image Spec — Image Layer Filesystem Changeset](https://github.com/opencontainers/image-spec/blob/main/layer.md)
+- [OCI Image Spec — Image Configuration](https://github.com/opencontainers/image-spec/blob/main/config.md)
+- [Docker — OverlayFS storage driver](https://docs.docker.com/engine/storage/drivers/overlayfs-driver/)
 - [Docker — Volumes](https://docs.docker.com/engine/storage/volumes/)
 - [Docker — Build cache](https://docs.docker.com/build/cache/)
-- [Kubernetes — User Namespaces](https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/)
+- [Docker — docker container stop](https://docs.docker.com/reference/cli/docker/container/stop/)
 - [Kubernetes — Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
-- [Kubernetes — Resource Management for Pods and Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
+- [CRI-O — crio.conf(5)](https://github.com/cri-o/cri-o/blob/main/docs/crio.conf.5.md)
 - 원글: [Container System(cgroup namespaces)](https://kimjanghyun1010.tistory.com/64), [Container System(filesystem)](https://kimjanghyun1010.tistory.com/90)

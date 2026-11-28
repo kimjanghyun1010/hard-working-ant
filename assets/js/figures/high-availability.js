@@ -1,4 +1,4 @@
-// High availability post: request path, VIP, storage replication, replica set votes, failover time, split brain.
+// High availability post: SPOF, active modes, VIP, DNS weights, failover time, write rollback, split brain.
 (() => {
   const U = hwa.ui, C = hwa.cv, TAU = Math.PI * 2;
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -6,7 +6,7 @@
   const lerp = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
   const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
   const BLUE = ['#dbeafe', '#1d4ed8', '#93c5fd'], PURPLE = ['#ede9fe', '#6d28d9', '#a78bfa'], GREEN = ['#dcfce7', '#15803d', '#86efac'];
-  const RED = ['#fee2e2', '#dc2626', '#fca5a5'], GRAY = [U.cell, U.muted, '#e2e8f0'], AMBER = ['#fef3c7', '#b45309', '#fcd34d'];
+  const RED = ['#fee2e2', '#dc2626', '#fca5a5'], AMBER = ['#fef3c7', '#b45309', '#fcd34d'];
   const fig = (id, o) => document.querySelectorAll(`[data-figure="high-availability-${id}"]`).forEach((root) => hwa.scene(root, o));
   const sceneOf = (time, SEC, HOLD, n) => { const { i, t } = hwa.loop(time, SEC, HOLD, n); return { i, t, run: (time % (n * (SEC + HOLD))) - i * (SEC + HOLD) }; };
 
@@ -277,13 +277,6 @@
       });
     };
 
-    // Data: CloudFront origin failover docs, default 3 attempts x 10 s; 1-3 attempts and 1-10 s are allowed.
-    const ot = [[10, '10초'], [20, '20초'], [30, '30초']], ol = ['요청', '1차 오리진', '2차 오리진'];
-    tl('origin', [
-      { pill: '기본값 10초 × 3회', tone: 'bad', span: 36, lanes: ol, ticks: ot, segs: [[1, 0, 9.6, 'try', '시도 1'], [1, 10, 19.6, 'try', '시도 2'], [1, 20, 29.6, 'try', '시도 3'], [2, 30, 32, 'sec', ''], [0, 32, 34, 'ok', '']], arcs: [[0, 0, 32, 'wait', '응답 대기']], event: [0, '1차 장애'], stamp: ['30초 기다린 뒤 넘어감', 'bad'], stampLane: 2, say: '기본값이면 1차 오리진에 10초씩 세 번 연결을 시도한 뒤에야 2차로 넘어간다. 그동안 요청은 기다린다.' },
-      { pill: '줄인 값 2초 × 1회', tone: 'ok', span: 36, lanes: ol, ticks: ot, segs: [[1, 0, 2, 'try', ''], [2, 2, 4, 'sec', ''], [0, 4, 6, 'ok', '']], arcs: [[0, 0, 4, 'wait', '']], event: [0, '1차 장애'], stamp: ['2초 만에 넘어감', 'ok'], stampLane: 2, say: '연결 제한 2초, 시도 1회로 줄이면 2초 만에 2차 오리진으로 넘어간다. 1차가 잠깐 느릴 때도 넘어가는 대가가 있다.' },
-    ], { demo: { modes: ['기본값', '줄인 값'], run: '1차 오리진 끊기' } });
-
     // Data: MongoDB elections typically under 12 s with defaults; times here are rounded for shape.
     const rl = ['클라이언트', 'rs0', 'rs1'], rt = [[10, '10초'], [20, '20초']];
     tl('rollback', [
@@ -292,65 +285,14 @@
     ], { SEC: 7.5, demo: { modes: ['w: 1', 'w: majority'], run: '쓰고 Primary 끄기' } });
   }
 
-  // nginx in front of two containers on one host: update standby, reload to it, update active, switch back.
-  {
-    const SEC = 6, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3), GAP = 0.34, DUR = 1.7;
-    const SC = [
-      { pill: 'standby 갱신', tone: 'info', note: 'standby를 v2로 올리고 nginx 안에서 curl로 200이 오는지 확인한다. 요청은 계속 active로 간다.' },
-      { pill: 'nginx reload', tone: 'ok', stamp: ['끊김 없이 standby로', 'ok'], note: 'proxy_pass를 standby로 바꾸고 reload한다. 새 요청은 standby로, 처리 중이던 요청은 끝까지 active에서 끝난다.' },
-      { pill: 'active 갱신 후 복귀', tone: 'ok', stamp: ['둘 다 v2, active로 복귀', 'ok'], note: 'active도 v2로 올리고 다시 active로 돌린 뒤 standby를 멈춘다.' },
-    ];
-    // Per scene: [standby update start, end], health check time, switch time, target before and after, active update, standby stop.
-    const P = [
-      { sb: [0.8, 2.4], hc: [2.8, 3.8, 1], sw: null, from: 0 },
-      { sw: 2.0, from: 0, to: 1 },
-      { ac: [0.6, 2.0], hc: [2.3, 3.2, 0], sw: 3.5, from: 1, to: 0, stop: 4.6 },
-    ];
-    fig('app', {
-      height: 270, still: S.at(1) + SEC + 1, scenes: S, notes: SC.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = sceneOf(time, SEC, HOLD, 3), p = P[i], narrow = w < 420;
-        const user = { x: 0, y: 118, w: 48, h: 44, t: '사용자' }, hx = 60, cw = clamp(w * 0.3, 92, 170);
-        const ng = { x: hx + 12, y: 112, w: clamp(w * 0.24, 70, 130), h: 56 };
-        const ct = [0, 1].map((k) => ({ x: w - cw - 12, y: 66 + k * 92, w: cw, h: 56 }));
-        const target = (tt) => (p.sw !== null && p.sw !== undefined && tt >= p.sw ? p.to : p.from);
-        const ver = (k) => {
-          if (k === 1) return i === 0 ? (t < p.sb[0] ? 'v1' : t < p.sb[1] ? '갱신 중' : 'v2') : i === 2 && t >= p.stop ? '중지' : 'v2';
-          return i < 2 ? 'v1' : t < p.ac[0] ? 'v1' : t < p.ac[1] ? '갱신 중' : 'v2';
-        };
-        const st = (k) => (ver(k) === '갱신 중' || ver(k) === '중지' ? 'idle' : 'ok');
-        const cy = (b) => b.y + b.h / 2;
-        C.pill(ctx, 0, 0, SC[i].pill, SC[i].tone);
-        C.group(ctx, hx, 34, w - hx, 226, narrow ? '서버 한 대' : '서버 한 대 (Docker 브리지 네트워크)', 52);
-        C.line(ctx, [[user.x + user.w, cy(user)], [ng.x, cy(ng)]], '#e2e8f0', 1);
-        ct.forEach((c) => C.line(ctx, [[ng.x + ng.w, cy(ng)], [c.x, cy(c)]], '#e2e8f0', 1));
-        const cards = () => ct.map((c, k) => ({ ...c, t: k ? 'standby' : 'active', s: ver(k), sc: ver(k) === 'v2' ? U.blue : undefined }));
-        flow(ctx, t, GAP, DUR, (tb) => {
-          const k = target(tb + DUR * 0.45), c = ct[k];
-          return { pts: [[user.x + user.w / 2, cy(user)], [ng.x + ng.w / 2, cy(ng)], [c.x + c.w / 2, cy(c)]] };
-        });
-        node(ctx, user);
-        node(ctx, { ...ng, t: 'nginx', s: `→ ${target(t) ? 'standby' : 'active'}`, sc: U.accent });
-        cards().forEach((c, k) => node(ctx, c, st(k)));
-        if (p.hc && t >= p.hc[0] && t < p.hc[1] + 0.6) {
-          const c = ct[p.hc[2]], q = lerp([ng.x + ng.w, cy(ng)], [c.x, cy(c) + (p.hc[2] ? -14 : 14)], ease(t, p.hc[0], p.hc[1]));
-          tag(ctx, t >= p.hc[1] ? '200' : 'curl', q[0], q[1], t >= p.hc[1] ? GREEN : GRAY);
-        }
-        if (p.sw && t >= p.sw - 0.2 && t < p.sw + 1.6) tag(ctx, 'nginx -s reload', ng.x + ng.w / 2, ng.y - 16, BLUE, ease(t, p.sw - 0.2, p.sw + 0.2));
-        if (SC[i].stamp) C.stamp(ctx, (hx + w) / 2, 246, SC[i].stamp[0], SC[i].stamp[1], (run - SEC) / 0.4);
-        say(`${SC[i].pill}. ${SC[i].note}`);
-      },
-    });
-  }
-
-  // keepalived pair in front of three kube-apiservers: VRRP adverts every second, VIP moves about 3 s after they stop.
+  // keepalived pair in front of three kube-apiservers: VRRP adverts every second, VIP moves about 3.6 s after they stop.
   {
     const SEC = 7.5, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 2), FAIL = 1.5, GAP = 0.36, DUR = 1.8, AT = 0.4;
-    // Data: keepalived.conf(5), master down timer = 3 x advert_int + skew; advert_int 1.
-    const MOVE = FAIL + 3.2;
+    // Data: RFC 5798 Master_Down_Interval = 3 x advert_int + (256 - priority) / 256; priority 100 -> 3.61 s.
+    const MOVE = FAIL + 3.6;
     const SC = [
       { pill: 'VRRP 광고 1초마다', tone: 'info', note: 'MASTER가 1초마다 VRRP 광고를 보내고, VIP로 온 요청을 살아 있는 apiserver로 나눈다.' },
-      { pill: 'MASTER 장애', tone: 'bad', stamp: ['약 3초 뒤 VIP 이동', 'warn'], note: 'MASTER가 멈추면 BACKUP은 광고가 3초쯤 끊긴 뒤 VIP를 가져간다. kubectl이 쓰는 주소는 그대로다.' },
+      { pill: 'MASTER 장애', tone: 'bad', stamp: ['약 3.6초 뒤 VIP 이동', 'warn'], note: 'MASTER가 멈추면 BACKUP은 광고가 3.6초 끊긴 뒤 VIP를 가져간다. kubectl이 쓰는 주소는 그대로다.' },
     ];
     fig('vip', {
       height: 272, still: S.at(1) + SEC + 1, scenes: S, notes: SC.map((s) => s.note),
@@ -396,173 +338,12 @@
     });
   }
 
-  // Two-way replication between Seoul and Tokyo buckets: a replica is never sent back.
-  {
-    const SEC = 6.5, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 2);
-    const SC = [
-      { pill: '서울에 올림', tone: 'info', stamp: ['복제본은 되돌아오지 않음', 'ok'], note: '서울에 올린 app.js가 도쿄로 복제된다. 복제로 생긴 객체는 다시 복제하지 않아 순환이 없다.' },
-      { pill: '도쿄에 올림', tone: 'info', stamp: ['어느 쪽에 써도 양쪽이 같음', 'ok'], note: '도쿄에 올린 logo.png는 반대 규칙으로 서울에 복제된다. 어느 쪽에 써도 양쪽 내용이 같아진다.' },
-    ];
-    fig('replication', {
-      height: 268, still: S.at(0) + SEC + 1, scenes: S, notes: SC.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = sceneOf(time, SEC, HOLD, 2), narrow = w < 420, bw = clamp(w * 0.34, 104, 220);
-        const bk = [{ x: 0, y: 92, w: bw, h: 120, t: '서울 버킷' }, { x: w - bw, y: 92, w: bw, h: 120, t: '도쿄 버킷' }];
-        const ci = { x: w / 2 - 44, y: 32, w: 88, h: 36, t: 'CI 배포' };
-        const ay = [132, 178], ax0 = bw + 8, ax1 = w - bw - 8;
-        C.pill(ctx, 0, 0, SC[i].pill, SC[i].tone);
-        bk.forEach((b) => { C.box(ctx, b.x, b.y, b.w, b.h, { fill: U.plot, r: 10 }); C.text(ctx, b.t, b.x + 10, b.y + 17, { size: 11, weight: 600, color: U.text }); });
-        node(ctx, ci);
-        C.arrow(ctx, [[ax0, ay[0]], [ax1, ay[0]]], 1, i === 0 ? U.purple : '#cbd5e1', { width: 1.2 });
-        C.arrow(ctx, [[ax1, ay[1]], [ax0, ay[1]]], 1, i === 1 ? U.purple : '#cbd5e1', { width: 1.2 });
-        C.text(ctx, narrow ? '서울→도쿄' : '규칙 서울→도쿄', w / 2, ay[0] - 7, { size: 9, align: 'center' });
-        C.text(ctx, narrow ? '도쿄→서울' : '규칙 도쿄→서울', w / 2, ay[1] + 15, { size: 9, align: 'center' });
-        // Objects: name, home bucket, scene it was uploaded in. Orig is blue, replica purple.
-        const OBJ = [['app.js', 0, 0], ['logo.png', 1, 1]];
-        const up = [0.5, 1.5], rep = [2.1, 3.6];
-        OBJ.forEach(([name, home, sc], k) => {
-          if (sc > i) return;
-          const now = sc === i, slotY = bk[0].y + 42 + k * 30, mid = (b) => b.x + b.w / 2;
-          const upK = now ? ease(t, up[0], up[1]) : 1, repK = now ? ease(t, rep[0], rep[1]) : 1;
-          if (upK < 1 && upK > 0) {
-            const q = lerp([w / 2, ci.y + ci.h], [mid(bk[home]), slotY], upK);
-            tag(ctx, name, q[0], q[1], BLUE);
-          } else if (upK >= 1) tag(ctx, name, mid(bk[home]), slotY, BLUE);
-          const other = 1 - home;
-          if (repK > 0 && repK < 1) {
-            const q = lerp([home ? ax1 : ax0, ay[home]], [home ? ax0 : ax1, ay[home]], repK);
-            tag(ctx, name, q[0], q[1], PURPLE);
-          } else if (repK >= 1) tag(ctx, narrow ? name : `${name} 복제본`, mid(bk[other]), slotY, PURPLE);
-        });
-        // The replica does not travel back: a dashed stub with a cross on the reverse arrow.
-        if (t >= 4.2) {
-          const a = ease(t, 4.2, 4.8), y = ay[1 - i], xs = i ? ax0 + 10 : ax1 - 10, xe = (ax0 + ax1) / 2 + (i ? -10 : 10);
-          ctx.globalAlpha = a;
-          C.dashed(ctx, xs, y, xe, y, U.red);
-          xmark(ctx, xe, y, 4);
-          if (ax1 - ax0 > 120) C.text(ctx, '복제본은 안 보냄', (xs + xe) / 2, y + (i ? 15 : -8), { size: 9, weight: 600, color: U.red, align: 'center' });
-          ctx.globalAlpha = 1;
-        }
-        C.text(ctx, '복제는 보통 몇 초, RTC를 켜면 99.9%를 15분 안에', w / 2, 226, { size: 10, align: 'center' });
-        C.stamp(ctx, w / 2, 250, SC[i].stamp[0], SC[i].stamp[1], (run - SEC) / 0.4);
-        say(`${SC[i].pill}. ${SC[i].note}`);
-      },
-    });
-  }
-
-  // One Multi-Region Access Point name in front of two buckets: closest active bucket, then Seoul set passive.
-  {
-    const SEC = 6.5, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 2), SET = 1.4, APPLY = 3.2, GAP = 0.34, DUR = 1.8;
-    const SC = [
-      { pill: '둘 다 활성', tone: 'info', note: '앱은 MRAP 이름 하나만 안다. 요청은 활성 상태인 가장 가까운 버킷으로 간다.' },
-      { pill: '서울을 비활성으로', tone: 'warn', stamp: ['앱 설정은 그대로', 'ok'], note: '서울을 비활성으로 돌리면 약 2분 뒤부터 모든 요청이 도쿄로 간다. 앱이 쓰는 이름은 바뀌지 않는다.' },
-    ];
-    fig('mrap', {
-      height: 236, still: S.at(1) + SEC + 1, scenes: S, notes: SC.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = sceneOf(time, SEC, HOLD, 2), narrow = w < 420, bw = clamp(w * 0.3, 92, 170);
-        const apps = [0, 1].map((k) => ({ x: 0, y: 50 + k * 110, w: narrow ? 56 : 76, h: 46, t: k ? '도쿄 앱' : '서울 앱' }));
-        const mx = apps[0].w + (narrow ? 14 : 40), mw = w - bw - mx - (narrow ? 14 : 40);
-        const mr = { x: mx, y: 60, w: mw, h: 136 };
-        const bk = [0, 1].map((k) => ({ x: w - bw, y: 50 + k * 110, w: bw, h: 46 }));
-        const passive = (tt) => i === 1 && tt >= APPLY;
-        const cy = (b) => b.y + b.h / 2;
-        C.pill(ctx, 0, 0, SC[i].pill, SC[i].tone);
-        apps.forEach((a) => C.line(ctx, [[a.x + a.w, cy(a)], [mr.x, cy(a)]], '#e2e8f0', 1));
-        bk.forEach((b) => C.line(ctx, [[mr.x + mr.w, cy(b)], [b.x, cy(b)]], '#e2e8f0', 1));
-        C.box(ctx, mr.x, mr.y, mr.w, mr.h, { fill: U.plot, r: 10 });
-        flow(ctx, t, GAP, DUR, (tb, j) => {
-          const from = j % 2, to = passive(tb + DUR * 0.5) ? 1 : from, a = apps[from], b = bk[to];
-          return { pts: [[a.x + a.w / 2, cy(a)], [mr.x, cy(a)], [mr.x + mr.w, cy(b)], [b.x + b.w / 2, cy(b)]] };
-        });
-        apps.forEach((a) => node(ctx, a));
-        bk.forEach((b, k) => {
-          const off = k === 0 && passive(t);
-          node(ctx, { ...b, t: k ? '도쿄 버킷' : '서울 버킷', s: off ? '비활성' : '활성', sc: off ? U.muted : GREEN[1] }, off ? 'idle' : 'ok');
-        });
-        C.text(ctx, 'MRAP', mr.x + mr.w / 2, mr.y + 20, { size: 11, weight: 600, color: U.text, align: 'center' });
-        C.text(ctx, narrow ? '이름 하나' : '전역 엔드포인트 하나', mr.x + mr.w / 2, mr.y + mr.h - 12, { size: 10, align: 'center' });
-        if (i === 1 && t >= SET && t < APPLY) {
-          tag(ctx, '라우팅 상태 변경', bk[0].x + bk[0].w / 2, bk[0].y - 12, AMBER, ease(t, SET, SET + 0.3));
-          C.text(ctx, '반영까지 약 2분', bk[0].x + bk[0].w / 2, bk[0].y + bk[0].h + 14, { size: 10, weight: 600, color: AMBER[1], align: 'center' });
-        }
-        if (SC[i].stamp) C.stamp(ctx, w / 2, 218, SC[i].stamp[0], SC[i].stamp[1], (run - SEC) / 0.4);
-        say(`${SC[i].pill}. ${SC[i].note}`);
-      },
-    });
-  }
-
-  // Demo: a three-member replica set loses one member or two. Votes from a majority elect a new Primary.
-  {
-    const F = 0.5, D1 = 3.5, E1 = 4.9, SEC = 6.2, GAP = 0.42, DUR = 1.4;
-    const notes = [
-      '하나가 멈추면 남은 둘이 10초 무응답을 확인하고 투표한다. 2/3 과반이라 새 Primary가 나온다.',
-      '둘이 멈추면 남은 하나는 1/3 표뿐이라 Primary가 될 수 없다. 쓰기가 멈춘다.',
-    ];
-    fig('quorum', {
-      height: 268, still: 0, notes,
-      demo: { modes: ['1대 장애', '2대 장애'], run: '장애 내기' },
-      frame: (ctx, w, h, time, say, ui) => {
-        const two = ui.mode === 1, r = ui.runAt === null ? -1 : time - ui.runAt, narrow = w < 420;
-        const cl = { x: 0, y: 118, w: 50, h: 44, t: '앱' }, nw = clamp(w * 0.3, 96, 160), nx = clamp(w * 0.3, 88, 220);
-        const ns = [0, 1, 2].map((k) => ({ x: nx, y: 38 + k * 72, w: nw, h: 50 }));
-        const down = (k) => r >= F && (k === 0 || (two && k === 1));
-        const cand = two ? 2 : 1, elected = !two && r >= E1;
-        const primary = elected ? 1 : r >= F ? -1 : 0;
-        const cy = (b) => b.y + b.h / 2, bx = nx + nw + 14, ix = bx + 16;
-        C.pill(ctx, 0, 0, r < 0 ? '정상, Primary rs0' : two ? '2대 장애' : '1대 장애', r < 0 ? 'ok' : r < E1 ? 'warn' : two ? 'bad' : 'ok');
-        ns.forEach((b) => C.line(ctx, [[cl.x + cl.w, cy(cl)], [b.x, cy(b)]], '#f1f5f9', 1));
-        // Heartbeat rail on the right of the members: a pulse every second between live members.
-        C.line(ctx, [[bx, cy(ns[0])], [bx, cy(ns[2])]], '#e2e8f0', 1);
-        ns.forEach((b, k) => { C.line(ctx, [[b.x + b.w, cy(b)], [bx, cy(b)]], '#e2e8f0', 1); if (!down(k)) dot(ctx, bx, cy(b), '#cbd5e1', 2.5); });
-        C.text(ctx, '하트비트', bx, ns[0].y - 8, { size: 9, align: 'center' });
-        const ph = (time * 1.2) % 1;
-        if (ph < 0.6) {
-          const live = [0, 1, 2].filter((k) => !down(k));
-          if (live.length > 1) dot(ctx, bx, lerp([0, cy(ns[live[0]])], [0, cy(ns[live[live.length - 1]])], ph / 0.6)[1], U.purple, 3);
-        }
-        ns.forEach((b, k) => node(ctx, b, down(k) ? 'down' : k === primary ? 'on' : 'ok', 'box'));
-        flow(ctx, r < 0 ? time : r, GAP, DUR, (tb) => {
-          const p = r < 0 ? 0 : tb + DUR >= F ? (!two && tb + DUR >= E1 ? 1 : -1) : 0, k = p < 0 ? (two && tb + DUR >= E1 ? 2 : 0) : p, b = ns[k];
-          return { pts: [[cl.x + cl.w / 2, cy(cl)], [b.x + 8, cy(b)]], fail: p < 0 };
-        });
-        node(ctx, cl, 'ok', 'all');
-        ns.forEach((b, k) => node(ctx, { ...b, t: `rs${k}`, s: down(k) ? '멈춤' : k === primary ? 'Primary' : 'Secondary', sc: k === primary ? U.accent : undefined }, down(k) ? 'down' : k === primary ? 'on' : 'ok', 'text'));
-        // Info column: silence timer, then votes.
-        const live = [0, 1, 2].filter((k) => !down(k));
-        if (r >= F && r < D1 + 0.4) {
-          const k = clamp((r - F) / (D1 - F)), bw2 = Math.max(40, w - ix - 4);
-          live.forEach((n) => {
-            const y = cy(ns[n]);
-            ctx.fillStyle = U.cell; ctx.fillRect(ix, y - 3, bw2, 6);
-            ctx.fillStyle = '#f59e0b'; ctx.fillRect(ix, y - 3, bw2 * k, 6);
-            C.text(ctx, `무응답 ${Math.round(k * 10)}초`, ix, y - 10, { size: 9, weight: 600, color: AMBER[1] });
-          });
-        }
-        if (r >= D1) {
-          const v = live.length, need = 2, a = ease(r, D1, D1 + 0.4);
-          ctx.globalAlpha = a;
-          C.text(ctx, `표 ${v}/3`, ix, cy(ns[cand]) + 1, { size: 13, weight: 700, color: v >= need ? GREEN[1] : U.red, base: 'middle' });
-          C.text(ctx, v >= need ? '과반' : '과반 아님', ix, cy(ns[cand]) + 17, { size: 9, weight: 600, color: v >= need ? GREEN[1] : U.red });
-          ctx.globalAlpha = 1;
-          if (!two && r < E1 + 0.5) {
-            const q = lerp([bx, cy(ns[2])], [bx, cy(ns[1])], ease(r, D1 + 0.2, E1 - 0.2));
-            tag(ctx, '투표', q[0], q[1], GREEN, 1, 9);
-          }
-        }
-        if (r >= SEC) C.stamp(ctx, nx + nw / 2, 254 - 4, two ? '과반 없음, 쓰기 멈춤' : '2/3 과반, 새 Primary rs1', two ? 'bad' : 'ok', (r - SEC) / 0.4);
-        if (r < 0) C.text(ctx, '장애 내기 버튼을 눌러 보자', nx + nw / 2, 254 - 6, { size: 12, align: 'center', base: 'middle' });
-        say(r < 0 ? 'rs0이 Primary인 세 대 레플리카셋.' : notes[ui.mode]);
-      },
-    });
-  }
-
   // Failover time per layer after the same failure: detection, then switching. Linear axis, 150 s.
   {
     const SEC = 7.5, HOLD = 2.4, SPAN = 150;
-    // Data: keepalived 3 x advert_int; MongoDB median election under 12 s; CloudFront 3 x 10 s; MRAP about 2 min; Route 53 30 s x 3 + TTL 60.
+    // Data: VRRP 3 x advert_int + skew; MongoDB median election under 12 s; CloudFront 3 x 10 s; MRAP about 2 min; Route 53 30 s x 3 + TTL 60.
     const ROWS = [
-      ['VIP', 'keepalived VIP', 3, 0, '약 3초'],
+      ['VIP', 'keepalived VIP', 3.6, 0, '약 3.6초'],
       ['MongoDB', 'MongoDB 선거', 10, 2, '약 12초'],
       ['CDN', 'CDN 오리진 그룹', 30, 0, '30초'],
       ['MRAP', 'S3 MRAP 전환', 0, 120, '약 2분'],
@@ -570,7 +351,7 @@
     ];
     fig('time', {
       height: 258, still: SEC + 0.5,
-      notes: ['같은 장애라도 계층마다 감지와 전환에 걸리는 시간이 50배까지 차이 난다. 설정값과 문서 기준의 대략값이다.'],
+      notes: ['같은 장애라도 계층마다 감지와 전환에 걸리는 시간이 40배 넘게 차이 난다. 설정값과 문서 기준의 대략값이다.'],
       frame: (ctx, w, h, time, say) => {
         const { t: tt, k } = hwa.loop(time, SEC, HOLD, 1), t = k * SPAN, narrow = w < 460, done = tt >= SEC;
         const x0 = narrow ? 58 : 118, x1 = w - 6, top = 44, RH = 36, X = (v) => x0 + (v / SPAN) * (x1 - x0);
@@ -596,7 +377,7 @@
           }
         });
         if (!done) C.dashed(ctx, X(t), top - 4, X(t), top + ROWS.length * RH, U.now);
-        else C.stamp(ctx, (x0 + x1) / 2 + 20, top + RH * 1.5, '3초에서 2분 30초까지', 'warn', (tt - SEC) / 0.4);
+        else C.stamp(ctx, (x0 + x1) / 2 + 20, top + RH * 1.5, '3.6초에서 2분 30초까지', 'warn', (tt - SEC) / 0.4);
         say(`장애 뒤 ${Math.round(t)}초. ` + ROWS.map((r) => `${r[1]} ${r[4]}`).join(', '));
       },
     });

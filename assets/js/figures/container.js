@@ -1,4 +1,4 @@
-// Container post figures, in post order: VM and container, namespaces, cgroup, image layers, OverlayFS, volumes, pods.
+// Container post figures, in post order: VM and container, root switch, namespaces, cgroup, image layers, OverlayFS, copy-up.
 (() => {
   const U = hwa.ui, C = hwa.cv, TAU = Math.PI * 2;
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -42,13 +42,6 @@
   };
   // Time since the current scene started, so stamps can fade in during the hold.
   const since = (time, sec, hold, n, i) => (time % ((sec + hold) * n)) - i * (sec + hold);
-  const user = (ctx, x, y, w, h) => {
-    C.box(ctx, x, y, w, h, { fill: '#fff', r: 8 });
-    const cx = x + w / 2, cy = y + h / 2;
-    ctx.fillStyle = '#94a3b8';
-    ctx.beginPath(); ctx.arc(cx, cy - 6, 5, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx, cy + 8, 8, 6, 0, Math.PI, 0); ctx.fill();
-  };
 
   // Timeline: lanes on a time axis, blocks for work, double arrows for waits. demo turns scenes into modes.
   const FILL = { a: U.blue, b: U.purple, c: '#14b8a6', copy: '#f59e0b', write: U.blue };
@@ -159,15 +152,6 @@
       },
     });
   });
-
-  // Overcommit: 12 vCPUs from three VMs on 4 cores. Staggered load fits; simultaneous load leaves each VM a third.
-  const spread = [0, 1, 2, 3].flatMap((j) => [[j, 0, 28, 'a', 'A'], [j, 34, 62, 'b', 'B'], [j, 68, 96, 'c', 'C']]);
-  const rr = [0, 1, 2, 3].flatMap((j) => Array.from({ length: 10 }, (_, s) => [j, s * 10, s * 10 + 10, 'abc'[s % 3], 'ABC'[s % 3]]));
-  const LEG = [['a', 'VM A'], ['b', 'VM B'], ['c', 'VM C']], CORES = ['코어 1', '코어 2', '코어 3', '코어 4'];
-  tl('container-overcommit', [
-    { pill: '바쁜 때가 엇갈림', tone: 'ok', span: 100, lanes: CORES, legend: LEG, ticks: [[50, '50ms'], [100, '100ms']], segs: spread, stamp: ['기다리는 VM 없음', 'ok'], say: '세 VM이 번갈아 바쁘면 코어 4개로 vCPU 12개가 모두 제때 돈다.' },
-    { pill: '셋이 같이 바쁨', tone: 'bad', span: 100, lanes: CORES, legend: LEG, ticks: [[50, '50ms'], [100, '100ms']], segs: rr, stamp: ['VM마다 3분의 2 대기 (steal)', 'bad'], say: '셋이 같이 바쁘면 VM마다 시간의 3분의 1만 받고, 나머지는 steal로 기다린다.' },
-  ], { SEC: 6, LH: 38 });
 
   // Directory tree: chroot leaves a path up to the real root; pivot_root plus umount removes it.
   each('container-root', (root) => {
@@ -321,55 +305,6 @@
     });
   });
 
-  // Demo: A leaks memory on a 4 GiB node next to B. Without a limit the node runs short and B slows; with 1 GiB only A restarts.
-  each('container-oom', (root) => {
-    const SEC = 7, SPAN = 30, SYS = 0.5, B = 1.5, NODE = 4, LIM = 1, GROW = 0.08, BACK = 1, CYC = (LIM - 0.5) / GROW + BACK;
-    const memA = (t, m) => (!m ? Math.min(0.5 + GROW * t, NODE - SYS - B) : (t % CYC < CYC - BACK ? 0.5 + GROW * (t % CYC) : 0));
-    // Shape only: B's latency climbs once the node passes 3.5 GiB and reclaim starts.
-    const lat = (t, m) => (m ? 20 : 20 + 380 * clamp((SYS + B + memA(t, 0) - 3.5) / 0.5));
-    const kills = (t) => (t < CYC - BACK ? 0 : Math.floor((t - (CYC - BACK)) / CYC) + 1);
-    const notes = ['limit이 없으면 A가 노드 메모리를 다 가져가고, 회수가 시작되면서 B의 응답까지 느려진다.', 'limit 1GiB면 A는 1GiB에서 혼자 OOMKilled되고 다시 뜬다. B는 그대로다.'];
-    hwa.scene(root, {
-      height: 300, still: 0, notes,
-      demo: { modes: ['limit 없음', 'limit 1GiB'], run: '메모리 새게 하기' },
-      frame: (ctx, w, h, time, say, ui) => {
-        const m = ui.mode, run = ui.runAt === null ? -1 : time - ui.runAt, tn = clamp(run / SEC) * SPAN;
-        C.pill(ctx, 0, 0, m ? 'A limit 1GiB' : 'A limit 없음', m ? 'info' : 'warn');
-        const L = run < 0 ? 20 : lat(tn, m);
-        C.text(ctx, `B 응답 ${Math.round(L)}ms`, w, 11, { size: 12, weight: 700, color: L > 100 ? U.red : U.text, align: 'right', base: 'middle' });
-        C.legend(ctx, 34, 40, [['A', U.blue], ['B', U.purple], ['시스템', '#94a3b8']]);
-        const x0 = 34, pw = w - x0 - 8, y0 = 58, ph = 132, y2 = 226, ph2 = 46, X = (t) => x0 + (t / SPAN) * pw;
-        const Y = C.panel(ctx, x0, y0, pw, ph, { max: 4.4, ticks: [[0, '0'], [2, '2G'], [4, '4G']] });
-        const Y2 = C.panel(ctx, x0, y2, pw, ph2, { title: 'B 응답 시간 (ms)', max: 440, ticks: [[0, '0'], [400, '400']] });
-        if (run >= 0) {
-          const ts = [];
-          for (let t = 0; t < tn; t += 0.1) ts.push(t);
-          ts.push(tn);
-          const pt = (f) => ts.map((t) => [X(t), Y(f(t))]);
-          C.area(ctx, pt(() => SYS), y0 + ph, '#e2e8f0');
-          C.area(ctx, pt(() => SYS + B), pt(() => SYS), '#ddd6fe');
-          C.area(ctx, pt((t) => SYS + B + memA(t, m)), pt(() => SYS + B), '#bfdbfe');
-          C.line(ctx, pt((t) => SYS + B + memA(t, m)), U.blue, 2);
-          C.line(ctx, ts.map((t) => [X(t), Y2(lat(t, m))]), U.purple, 2);
-          if (!m && tn >= 12.5) C.event(ctx, X(12.5), y0 + 26, y2 + ph2, '회수 시작', U.red);
-          if (m) for (let j = 0; j < kills(tn); j++) C.event(ctx, X(CYC - BACK + j * CYC), y0 + 26, y0 + ph, j ? '' : 'OOMKilled', U.red, 'left');
-          if (run < SEC) C.dashed(ctx, X(tn), y0, X(tn), y2 + ph2, U.now);
-        }
-        C.dashed(ctx, x0, Y(NODE), x0 + pw, Y(NODE), U.red);
-        C.text(ctx, '노드 4GiB', x0 + pw - 4, Y(NODE) - 4, { size: 10, weight: 600, color: U.red, align: 'right' });
-        if (m) {
-          C.dashed(ctx, x0, Y(SYS + B + LIM), x0 + pw, Y(SYS + B + LIM), ORANGE[1]);
-          C.text(ctx, 'A limit', x0 + pw - 4, Y(SYS + B + LIM) - 4, { size: 10, weight: 600, color: ORANGE[1], align: 'right' });
-        }
-        C.text(ctx, '0초', x0, y2 + ph2 + 14, { size: 10 });
-        C.text(ctx, '30초', x0 + pw, y2 + ph2 + 14, { size: 10, align: 'right' });
-        if (run < 0) C.text(ctx, '메모리 새게 하기 버튼을 눌러 보자', x0 + pw / 2, y0 + ph / 2 - 10, { size: 12, align: 'center', base: 'middle' });
-        if (run >= SEC) C.stamp(ctx, x0 + pw / 2, y0 + 46, m ? `A만 ${kills(SPAN)}번 재시작, B 그대로` : 'B 응답 20ms → 400ms', m ? 'ok' : 'bad', (run - SEC) / 0.4);
-        say(run < 0 ? '메모리 새게 하기 버튼을 누르면 A의 메모리가 늘어난다.' : notes[m]);
-      },
-    });
-  });
-
   // Image layers: one per filesystem-changing instruction, then two images sharing the base layer on disk.
   each('container-layers', (root) => {
     const SEC = 6, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
@@ -408,48 +343,6 @@
         }
         C.stamp(ctx, w / 2, i ? 96 : 160, i ? '베이스 레이어는 한 벌만 저장' : '파일을 바꾼 명령만 레이어', i ? 'ok' : 'info', (run - SEC + 0.4) / 0.4);
         say(notes[i]);
-      },
-    });
-  });
-
-  // Build cache after one source edit: copying the source first reruns npm ci; copying package.json first does not.
-  // Times are examples for shape.
-  each('container-cache', (root) => {
-    const SEC = 6.5, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const SC = [
-      { pill: '소스를 먼저 복사', tone: 'bad', rows: [['FROM node:22-slim', 0], ['COPY . /app/', 1, true], ['RUN cd /app && npm ci', 40], ['CMD node /app/server.js', null]], stamp: ['npm ci부터 다시, 41초', 'bad'] },
-      { pill: 'package.json 먼저 복사', tone: 'ok', rows: [['FROM node:22-slim', 0], ['COPY package*.json /app/', 0], ['RUN cd /app && npm ci', 0], ['COPY . /app/', 1, true], ['CMD node /app/server.js', null]], stamp: ['마지막 COPY만, 1초', 'ok'] },
-    ];
-    const notes = ['소스를 먼저 복사하면 소스가 바뀔 때마다 그 위의 npm ci도 다시 돈다.', 'package.json을 먼저 복사하면 소스가 바뀌어도 마지막 COPY만 다시 한다.'];
-    hwa.scene(root, {
-      height: 284, still: S.at(1) + SEC + 0.6, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), s = SC[i], run = since(time, SEC, HOLD, 2, i);
-        C.pill(ctx, 0, 0, s.pill, s.tone);
-        if (w >= 400) {
-          C.text(ctx, 'server.js 한 줄 수정', w, 11, { size: 10, weight: 600, color: ORANGE[1], align: 'right', base: 'middle' });
-          ball(ctx, [w - tw(ctx, 'server.js 한 줄 수정', 10, 600) - 9, 11], '#f59e0b', 3.5);
-        }
-        // Each row takes 0.5 s; reruns take longer in proportion to their build time.
-        let at = 0.2, total = 0, cur = -1;
-        s.rows.forEach(([line, sec, changed], r) => {
-          const dur = 0.5 + (sec ? Math.min(2.2, 0.5 + sec / 20) : 0), f = clamp((t - at) / dur), y = 46 + r * 38;
-          if (f > 0 && f < 1) cur = r;
-          C.box(ctx, 0, y, w, 30, { fill: '#fff', on: f > 0 && f < 1, r: 6 });
-          C.text(ctx, line, 10, y + 15.5, { size: 10, weight: 600, color: U.text, base: 'middle' });
-          if (f > 0 && sec) { ctx.fillStyle = 'rgba(239,68,68,0.5)'; ctx.fillRect(4, y + 25, (w - 8) * f, 2.5); }
-          if (f >= 1) {
-            const st = sec === null ? ['설정', MUTE] : sec ? [`다시 ${sec}초`, RED] : ['캐시', GREEN];
-            tag(ctx, st[0], w - 8, y + 15, st[1], { right: true, size: 10, pad: 14 });
-            if (changed && w >= 400) tag(ctx, '입력 바뀜', w - 20 - tw(ctx, st[0], 10, 600) - 14, y + 15, ORANGE, { right: true, size: 10, pad: 14 });
-          }
-          total += (sec || 0) * f;
-          at += dur;
-        });
-        C.text(ctx, '빌드 시간', 0, h - 18, { size: 10 });
-        C.text(ctx, `${Math.round(total)}초`, 52, h - 16, { size: 20, weight: 700, color: total > 5 ? U.red : U.tones.ok[1] });
-        C.stamp(ctx, w / 2 + 40, h - 22, s.stamp[0], s.stamp[1], (run - SEC + 0.3) / 0.4);
-        say(`${s.pill}. ${notes[i]}${cur >= 0 ? ` 지금 ${s.rows[cur][0]}` : ''}`);
       },
     });
   });
@@ -511,108 +404,4 @@
     { pill: 'DB 파일 2GB', tone: 'bad', span: 2400, lanes: ['복사', '앱의 쓰기'], ticks: [[1000, '1초'], [2000, '2초']], segs: [[0, 0, 2000, 'copy', '2GB copy-up'], [1, 2000, 2010, 'write', '']], arcs: [[1, 0, 2000, 'late', '쓰기 대기']], event: [0, 'write()'], stamp: ['첫 쓰기 2초 대기', 'bad'], say: '2GB 파일은 한 바이트를 고쳐도 2GB를 위층에 복사하는 약 2초 동안 쓰기가 기다린다.' },
   ], { SEC: 5, demo: { modes: ['설정 파일 4KB', 'DB 파일 2GB'], run: '한 줄 고치기' } });
 
-  // Demo: replacing v1 with v2 deletes v1's upperdir; files on a volume stay and mount into v2.
-  each('container-volume', (root) => {
-    const SEC = 4.6, FILES = ['a.jpg', 'b.jpg', 'c.jpg'];
-    const notes = ['컨테이너 레이어에 둔 파일은 옛 컨테이너와 함께 지워진다.', '볼륨에 둔 파일은 새 컨테이너의 /data에 그대로 붙는다.'];
-    hwa.scene(root, {
-      height: 258, still: 0, notes,
-      demo: { modes: ['컨테이너 레이어', '볼륨'], run: '새 버전으로 교체' },
-      frame: (ctx, w, h, time, say, ui) => {
-        const m = ui.mode, r = ui.runAt === null ? -1 : time - ui.runAt;
-        const bw = (w - 24) / 2, by = 34, bh = 118, VY = 190, X2 = w - bw;
-        const a1 = r < 1 ? 1 : 1 - 0.8 * mv(r, 1, 2), a2 = mv(r, 2, 2.8), mount2 = mv(r, 3, 3.8);
-        C.pill(ctx, 0, 0, r < 0 ? 'v1 실행 중' : r < 1 ? 'v1 중지' : r < 2 ? 'v1 삭제' : 'v2 실행 중', r >= 1 && r < 2 ? 'warn' : 'info');
-        const fileRow = (cx, y, span, col, a) => FILES.forEach((f, j) => tag(ctx, f, cx + (j - 1) * span, y, col, { size: 9, pad: 10, a }));
-        const box = (x, title, a, empty) => {
-          ctx.globalAlpha = a;
-          C.box(ctx, x, by, bw, bh, { fill: '#fff', r: 8 });
-          C.text(ctx, title, x + 10, by + 16, { size: 11, weight: 600, color: U.text });
-          C.box(ctx, x + 8, by + 26, bw - 16, 46, { fill: U.plot, r: 6 });
-          C.text(ctx, 'upperdir', x + 14, by + 38, { size: 9 });
-          if (empty) C.text(ctx, '비어 있음', x + bw / 2, by + 56, { size: 9, align: 'center', base: 'middle' });
-          C.box(ctx, x + 8, by + 78, bw - 16, 32, { fill: U.cell, r: 6 });
-          C.text(ctx, title.replace('컨테이너', '이미지'), x + bw / 2, by + 94.5, { size: 10, weight: 600, align: 'center', base: 'middle' });
-          ctx.globalAlpha = 1;
-        };
-        const mountLine = (x, g) => {
-          if (g <= 0) return;
-          C.line(ctx, [[x, by + bh], [x, by + bh + (VY - by - bh) * g]], U.blue, 1.6);
-          if (g >= 1) C.text(ctx, '/data', x + 5, by + bh + 20, { size: 10, weight: 700, color: U.blue });
-        };
-        box(0, '컨테이너 v1', a1, m === 1);
-        if (!m) fileRow(bw / 2, by + 56, Math.min(46, (bw - 20) / 3), r >= 1 ? RED : BLUE, a1);
-        if (m) { ctx.globalAlpha = a1; mountLine(bw / 2, 1); ctx.globalAlpha = 1; }
-        if (a2 > 0) box(X2, '컨테이너 v2', a2, true);
-        if (a2 < 1) {
-          ctx.globalAlpha = 1 - a2;
-          C.box(ctx, X2, by, bw, bh, { fill: U.plot, dash: [4, 3], r: 8 });
-          if (r < 0) C.wrap(ctx, '새 버전으로 교체 버튼을 눌러 보자', X2 + bw / 2, by + bh / 2 - 8, bw - 20, { size: 11, weight: 400, color: U.muted });
-          ctx.globalAlpha = 1;
-        }
-        if (r >= 2) C.arrow(ctx, [[bw + 3, by + 50], [X2 - 3, by + 50]], mv(r, 2, 2.5), '#94a3b8');
-        if (m) mountLine(X2 + bw / 2, mount2);
-        C.box(ctx, 0, VY, w, 56, { fill: U.plot, stroke: m ? BLUE[2] : U.grid, r: 8 });
-        C.text(ctx, '볼륨 (컨테이너 밖, 호스트 디스크)', 10, VY + 15, { size: 10, weight: 600 });
-        if (m) fileRow(w / 2, VY + 37, 50, BLUE, 1);
-        else C.text(ctx, '비어 있음', w / 2, VY + 37, { size: 9, align: 'center', base: 'middle' });
-        if (r >= SEC) C.stamp(ctx, w / 2, by + bh + 18, m ? '파일 3개 그대로' : '파일 3개 사라짐', m ? 'ok' : 'bad', (r - SEC) / 0.4);
-        say(r < 0 ? '새 버전으로 교체 버튼을 누르면 v1을 지우고 v2를 띄운다.' : notes[m]);
-      },
-    });
-  });
-
-  // Pod: the pause container holds the network namespace; app and sidecar share it but keep their own cgroups.
-  each('container-pod', (root) => {
-    const SEC = 6, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 2);
-    const notes = ['파드 안 컨테이너는 IP 하나를 같이 쓰고, 사이드카는 localhost:8080으로 앱에 붙는다.', '파일 시스템과 cgroup은 컨테이너마다 따로라, app이 limit에 걸려 재시작돼도 사이드카는 그대로다.'];
-    hwa.scene(root, {
-      height: 236, still: S.at(1) + SEC + 0.6, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, k } = hwa.loop(time, SEC, HOLD, 2), run = since(time, SEC, HOLD, 2, i);
-        C.pill(ctx, 0, 0, i ? '따로 쓰는 것' : '같이 쓰는 것', i ? 'warn' : 'info');
-        const px = 48, NY = 58, CY = 102, CH = h - CY - 10, pw = 52, cw = (w - 8 - px - 8 - pw - 16) / 2;
-        const xs = [px + 8, px + 8 + pw + 8, px + 8 + pw + 8 + cw + 8], ws = [pw, cw, cw], app = xs[1] + cw / 2, side = xs[2] + cw / 2;
-        user(ctx, 0, CY + 10, 40, 40);
-        C.box(ctx, px, 32, w - px, h - 32, { fill: U.plot, dash: [4, 3], r: 10 });
-        C.text(ctx, '파드', px + 10, 48, { size: 10, weight: 600, color: U.text });
-        C.box(ctx, px + 8, NY, w - px - 16, 32, { fill: '#eff6ff', stroke: '#bfdbfe', on: !i && k > 0.1 && k < 0.3, r: 6 });
-        C.text(ctx, w >= 420 ? 'network namespace (pause가 잡아 둠)' : 'network namespace', px + 16, NY + 16.5, { size: 10, weight: 600, color: BLUE[1], base: 'middle' });
-        C.text(ctx, '10.244.1.5', w - 16, NY + 16.5, { size: 10, weight: 700, color: BLUE[1], align: 'right', base: 'middle' });
-        ['pause', 'app', 'sidecar'].forEach((t, j) => {
-          C.line(ctx, [[xs[j] + ws[j] / 2, NY + 32], [xs[j] + ws[j] / 2, CY]], '#bfdbfe', 1.2);
-          const dead = i && j === 1 && k > 0.55 && k < 0.72;
-          C.box(ctx, xs[j], CY, ws[j], CH, { fill: '#fff', stroke: dead ? U.red : U.grid, r: 8 });
-          C.text(ctx, t, xs[j] + ws[j] / 2, CY + 16, { size: 11, weight: 600, color: dead ? U.red : U.text, align: 'center', base: 'middle' });
-        });
-        const lineAt = (j, s, y, col = U.muted, weight = 400) => C.text(ctx, s, xs[j] + ws[j] / 2, CY + y, { size: 9, weight, color: col, align: 'center', base: 'middle' });
-        if (!i) {
-          lineAt(1, ':8080 열기', 38, U.text, 600);
-          lineAt(2, 'localhost:8080', 38, U.text, 600);
-          const f = mv(k, 0.05, 0.42), g = mv(k, 0.5, 0.78);
-          if (f > 0 && f < 1) ball(ctx, hop([[40, CY + 30], [px + 30, NY + 16], [app, NY + 30], [app, CY + 56]], f).p);
-          if (g > 0 && g < 1) {
-            const p = lerp([side - 20, CY + 70], [app + 20, CY + 70], hwa.smooth(g));
-            ball(ctx, p, U.purple);
-            C.text(ctx, 'localhost', p[0], p[1] - 10, { size: 9, weight: 700, color: U.purple, align: 'center' });
-          }
-          C.stamp(ctx, (px + w) / 2, CY + CH - 22, 'IP 하나를 같이 씀', 'info', (run - SEC + 0.4) / 0.4);
-        } else {
-          [1, 2].forEach((j) => {
-            lineAt(j, j === 1 ? 'app 이미지' : 'proxy 이미지', 36);
-            lineAt(j, 'limit 512Mi', 50);
-            const fill = j === 2 ? 0.3 : k < 0.55 ? 0.3 + 0.7 * mv(k, 0.08, 0.55) : k < 0.72 ? 1 : 0.15 + 0.15 * mv(k, 0.72, 0.9);
-            const bx = xs[j] + 10, bW = ws[j] - 20, by = CY + 62;
-            C.box(ctx, bx, by, bW, 10, { fill: U.cell, r: 3 });
-            ctx.fillStyle = fill >= 1 ? U.red : j === 1 ? U.blue : U.tones.ok[1];
-            ctx.beginPath(); ctx.roundRect(bx, by, bW * fill, 10, 3); ctx.fill();
-          });
-          if (k > 0.55) lineAt(1, k < 0.72 ? 'OOMKilled' : '다시 뜸', 90, k < 0.72 ? U.red : U.tones.ok[1], 700);
-          lineAt(2, '그대로 돎', 90, U.tones.ok[1], 700);
-          C.stamp(ctx, (px + w) / 2, CY + CH - 22, 'app만 재시작', 'warn', (run - SEC + 0.4) / 0.4);
-        }
-        say(notes[i]);
-      },
-    });
-  });
 })();

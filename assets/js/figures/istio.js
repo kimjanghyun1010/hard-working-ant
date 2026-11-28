@@ -44,148 +44,13 @@
     ctx.stroke();
   };
   const tone = (t) => ({ fill: t[0], stroke: t[2] });
-  const legendRight = (ctx, w, items) => {
-    ctx.font = U.font(10);
-    const lw = items.reduce((a, [s]) => a + 24 + ctx.measureText(s).width, 0);
-    C.legend(ctx, w - lw + 12, 11, items);
-  };
   const hint = (ctx, s, x, y) => C.text(ctx, s, x, y, { size: 12, align: 'center', base: 'middle' });
-
-  // A slow C fills B's threads with waits, then A's: the failure travels upstream.
-  fig('istio-cascade', (root) => {
-    const S = seq([5, 6, 6], 1.8);
-    const SV = [['주문 A', 0], ['결제 B', 1], ['재고 C', 2]];
-    const PILL = [['평소', 'ok'], ['C 응답 없음', 'warn'], ['A까지 멈춤', 'bad']];
-    const notes = [
-      '평소에는 요청이 A, B, C를 지나 금방 돌아와서 스레드 칸이 잠깐씩만 찬다.',
-      'C가 응답하지 않자, C를 부른 B의 스레드가 하나씩 응답 대기로 묶인다.',
-      'B의 스레드가 다 묶이면 B를 부른 A의 스레드가 묶여, A까지 응답하지 못한다.',
-    ];
-    hwa.scene(root, {
-      height: 196, still: S.still, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = S.pos(time);
-        C.pill(ctx, 0, 0, PILL[i][0], PILL[i][1]);
-        const ux = 40, bw = Math.min(150, (w - ux - 3 * 22) / 3), gap = (w - ux - 3 * bw) / 3, y0 = 44, bh = 112;
-        const bx = (j) => ux + gap + j * (bw + gap), ly = y0 + 64;
-        const wait = [i === 2 ? Math.min(6, Math.floor(t * 1.2)) : 0, i === 0 ? 0 : i === 1 ? Math.min(6, Math.floor(t * 1.2)) : 6, 0];
-        C.text(ctx, '사용자', 0, ly - 12, { size: 10, weight: 600, color: U.text });
-        [0, 1, 2].forEach((j) => {
-          const x0 = j ? bx(j - 1) + bw : 0, x1 = bx(j);
-          C.arrow(ctx, [[x0 + 2, ly], [x1 - 2, ly]], 1, '#cbd5e1', { width: 1.2 });
-          const col = j === 0 && wait[0] >= 6 ? U.red : (j === 2 && i >= 1) || (j === 1 && i === 2) ? '#f59e0b' : U.blue;
-          [0, 0.5].forEach((o) => ball(ctx, mix([x0 + 4, ly], [x1 - 8, ly], (t * 0.6 + o + j * 0.17) % 1), col, 3.5));
-        });
-        SV.forEach(([name, j]) => {
-          const x = bx(j), dead = j === 2 && i >= 1, full = wait[j] >= 6;
-          C.box(ctx, x, y0, bw, bh, { fill: '#fff', stroke: dead || full ? BAD[2] : U.grid });
-          C.text(ctx, name, x + bw / 2, y0 + 18, { size: 12, weight: 600, color: U.text, align: 'center' });
-          C.text(ctx, '스레드 6개', x + bw / 2, y0 + 34, { size: 10, align: 'center' });
-          const s = 14, gx = x + (bw - 3 * s - 8) / 2;
-          for (let k = 0; k < 6; k++) {
-            const cx = gx + (k % 3) * (s + 4), cy = y0 + 44 + Math.floor(k / 3) * (s + 4);
-            const busy = !dead && ((t * 0.9 + k * 0.31 + j * 0.13) % 1) < 0.22;
-            ctx.fillStyle = k < wait[j] ? '#f59e0b' : busy ? U.blue : U.cell;
-            ctx.beginPath(); ctx.roundRect(cx, cy, s, s, 3); ctx.fill();
-          }
-          const st = dead ? ['응답 없음', BAD[1]] : wait[j] ? [`대기 ${wait[j]}/6`, full ? BAD[1] : WAIT[1]] : ['정상', OK[1]];
-          C.text(ctx, st[0], x + bw / 2, y0 + 98, { size: 11, weight: 700, color: st[1], align: 'center' });
-        });
-        if (i === 1) C.stamp(ctx, (bx(1) + bx(2) + bw) / 2, y0 + bh + 22, 'B 스레드 6/6 대기', 'warn', (run - 6) / 0.4);
-        if (i === 2) C.stamp(ctx, (bx(0) + bx(1) + bw) / 2, y0 + bh + 22, 'A, B 스레드 전부 대기', 'bad', (run - 6) / 0.4);
-        say(`${PILL[i][0]}. ${notes[i]}`);
-      },
-    });
-  });
-
-  // Resilience code in each service (three libraries, three sets of values) against one proxy config from istiod.
-  fig('istio-where', (root) => {
-    const S = seq([5, 6], 2);
-    const SV = [['주문', 'Java', 'Resilience4j', '재시도 3, 2s'], ['결제', 'Node.js', 'opossum', '재시도 0, 10s'], ['재고', 'Go', 'gobreaker', '재시도 5, 무제한']];
-    const notes = [
-      '코드에 넣으면 언어마다 라이브러리가 다르고, 재시도와 타임아웃 값도 서비스마다 제각각이다.',
-      '프록시로 빼면 앱은 그대로 두고, istiod가 같은 설정을 모든 프록시에 내려보낸다.',
-    ];
-    hwa.scene(root, {
-      height: 240, still: S.still, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = S.pos(time);
-        C.pill(ctx, 0, 0, i ? '프록시로 빼기' : '코드에 넣기', i ? 'ok' : 'warn');
-        const iw = Math.min(110, Math.max(64, w * 0.18)), pw = Math.min(w - iw - 24, 400), cw = Math.min(150, (pw - 18) / 2);
-        const ix = w - iw, top = 36, rh = 60;
-        const out = i ? ease(t, 0.2, 1.0) : 0, inn = i ? ease(t, 1.0, 1.8) : 0;
-        if (i) {
-          ctx.globalAlpha = ease(t, 0.2, 0.8);
-          C.card(ctx, { x: ix, y: top, w: iw, h: 3 * rh - 12, t: 'istiod', s: 'xDS' }, { fill: U.plot });
-          ctx.globalAlpha = 1;
-        }
-        SV.forEach(([name, lang, lib, val], r) => {
-          const y = top + r * rh, bh = rh - 12;
-          C.box(ctx, 0, y, pw, bh, { fill: U.plot });
-          C.card(ctx, { x: 6, y: y + 5, w: cw, h: bh - 10, t: name, s: lang });
-          const lx = 12 + cw, lw = pw - lx - 6, card = { x: lx, y: y + 5, w: lw, h: bh - 10 };
-          if (out < 1) { ctx.globalAlpha = 1 - out; C.card(ctx, { ...card, t: lib, s: val }, tone(WAIT)); ctx.globalAlpha = 1; }
-          if (inn > 0) {
-            const got = t > 2.6 + r * 0.4;
-            ctx.globalAlpha = inn;
-            C.card(ctx, { ...card, t: 'Envoy', s: got ? '재시도 2, 2s' : '설정 대기' }, { ...tone(PROXY), lit: got && t < 3.6 + r * 0.4 });
-            ctx.globalAlpha = 1;
-            C.arrow(ctx, [[ix - 2, y + bh / 2], [lx + lw + 2, y + bh / 2]], ease(t, 2.0 + r * 0.4, 2.6 + r * 0.4), PROXY[1], { width: 1.4 });
-          }
-        });
-        const sy = top + 3 * rh + 8;
-        if (i === 0) C.stamp(ctx, w / 2, sy, '라이브러리 3개, 값 3벌', 'warn', (run - 5) / 0.4);
-        else C.stamp(ctx, w / 2, sy, '설정 한 벌', 'ok', (run - 6) / 0.4);
-        say(notes[i]);
-      },
-    });
-  });
-
-  // The pod spec passes the API server, istiod's webhook adds istio-init and istio-proxy, and the pod starts with three containers.
-  fig('istio-inject', (root) => {
-    const LEN = 9, HOLD = 2.2;
-    const ADD = [['istio-init', 'iptables 쓰고 끝남'], ['istio-proxy', 'Envoy']];
-    hwa.scene(root, {
-      height: 262, still: LEN + 0.5,
-      frame: (ctx, w, h, time, say) => {
-        const t = Math.min(time % (LEN + HOLD), LEN), cw = Math.min(140, (w - 48) / 3), gap = (w - 3 * cw) / 2;
-        const sx = 0, ax = cw + gap, px = 2 * (cw + gap), top = 104, ch = 130;
-        const step = t < 1.7 ? 0 : t < 4.4 ? 1 : t < 6 ? 2 : 3;
-        C.pill(ctx, 0, 0, ['파드 스펙 제출', '웹훅이 고침', '노드에 배치', '컨테이너 기동'][step], 'info');
-        const api = { x: ax, y: top + 40, w: cw, h: 46, t: 'API 서버' }, ist = { x: ax, y: 32, w: cw, h: 46, t: 'istiod', s: '주입 웹훅' };
-        C.card(ctx, api, { lit: step === 0 && t > 1.2 });
-        C.card(ctx, ist, { lit: step === 1, fill: U.plot });
-        // Spec card: app from the start, the two injected containers after the webhook answers.
-        C.box(ctx, sx, top, cw, ch, { fill: '#fff' });
-        C.text(ctx, 'Pod 스펙', sx + 10, top + 18, { size: 11, weight: 600, color: U.text });
-        tag(ctx, 'app', sx + cw / 2, top + 42, BLUE);
-        ADD.forEach(([s], j) => tag(ctx, `+ ${s}`, sx + cw / 2, top + 68 + j * 26, OK, ease(t, 4.0 + j * 0.2, 4.4 + j * 0.2)));
-        // Pod on the node: init runs then finishes, proxy starts before app (native sidecar).
-        C.group(ctx, px, top, cw, ch, '노드의 파드', top + 18);
-        const rows = [['istio-init', 6.3, 7.3], ['istio-proxy', 6.9, 99], ['app', 7.6, 99]];
-        rows.forEach(([s, on, off], j) => {
-          const a = ease(t, on, on + 0.4);
-          if (a <= 0) return;
-          const done = t >= off;
-          tag(ctx, done ? `${s} 완료` : s, px + cw / 2, top + 42 + j * 26, done ? PLAIN : s === 'istio-proxy' ? PROXY : BLUE, a);
-        });
-        const a1 = [[sx + cw + 2, top + 62], [ax - 2, top + 62]], a2 = [[ax + cw / 2 - 14, top + 38], [ax + cw / 2 - 14, 80]];
-        const a3 = [[ax + cw / 2 + 14, 80], [ax + cw / 2 + 14, top + 38]], a4 = [[ax + cw + 2, top + 62], [px - 2, top + 62]];
-        [[a1, 0.3, 1.2, 1, U.accent], [a2, 1.8, 2.6, 2, U.accent], [a3, 3.2, 4.0, 3, OK[1]], [a4, 4.8, 5.8, 4, U.accent]].forEach(([pts, a, b, n, col]) => {
-          C.arrow(ctx, pts, ease(t, a, b), col, { width: 1.4 });
-          if (t > a) C.badge(ctx, pts, n, t < b + 0.4, pts[0][0] === pts[1][0] ? (n === 2 ? 'left' : 'right') : 'up');
-        });
-        C.stamp(ctx, w / 2, top + ch + 22, '컨테이너 1개가 3개로', 'info', (t - 8.2) / 0.4);
-        say('파드 스펙이 API 서버를 지나 istiod 웹훅에서 istio-init과 istio-proxy가 붙은 뒤 노드에서 뜬다.');
-      },
-    });
-  });
 
   // One request from pod A's app to pod B's app: iptables sends it to Envoy on each side, the hop between nodes is mTLS.
   fig('istio-path', (root) => {
     const S = seq([5.5, 5.5], 1.6);
     const notes = [
-      '앱이 payments로 보낸 요청을 iptables가 Envoy 15001로 돌리고, Envoy가 mTLS로 감싸 내보낸다.',
+      '앱의 연결은 iptables가 Envoy 15001로 돌리고, UID 1337인 Envoy가 mTLS로 감싼 연결은 그대로 나간다.',
       '파드 B의 iptables가 들어온 연결을 Envoy 15006으로 돌리고, Envoy가 TLS를 풀어 앱 8080에 넘긴다.',
     ];
     hwa.scene(root, {
@@ -295,93 +160,8 @@
     });
   });
 
-  // productpage's Envoy checks the VirtualService rules top-down; jason goes to subset v2, everyone else to v1.
-  fig('istio-routing', (root) => {
-    const GAP = 0.9, N = 12, T = GAP * N;
-    hwa.scene(root, {
-      height: 222, still: 5.6,
-      notes: ['보내는 쪽 Envoy가 VirtualService 규칙을 위에서부터 맞춰 보고, jason만 v2로 보낸다.'],
-      frame: (ctx, w, h, time, say) => {
-        const lt = time % T;
-        C.pill(ctx, 0, 0, 'end-user 헤더로 나눔', 'info');
-        legendRight(ctx, w, [['jason', U.purple], ['다른 사용자', U.blue]]);
-        const ex = 44, ew = Math.min(180, w * 0.4), ey = 40, eh = 164, rw = Math.min(200, w - ex - ew - 26), rx = w - rw;
-        const R = [ey + 82, ey + 128];
-        C.text(ctx, '사용자', 0, ey + 60, { size: 10, weight: 600, color: U.text });
-        C.box(ctx, ex, ey, ew, eh, { fill: PROXY[0], stroke: PROXY[2] });
-        C.text(ctx, 'productpage의 Envoy', ex + 10, ey + 18, { size: 10, weight: 600, color: PROXY[1] });
-        C.text(ctx, 'VirtualService 규칙', ex + 10, ey + 36, { size: 9 });
-        const pods = [[ey + 4, 'v1'], [ey + 50, 'v1'], [ey + 112, 'v2']];
-        C.group(ctx, rx, ey - 4, rw, eh + 12, '', 0);
-        C.text(ctx, 'DestinationRule', rx + 8, ey + 10, { size: 9 });
-        const hot = [false, false], fill = [0, 0, 0];
-        for (let n = -3; n < N; n++) {
-          const r = lt - n * GAP;
-          if (r < 0 || r > 2.6) continue;
-          const jason = ((n % 3) + 3) % 3 === 1, row = jason ? 0 : 1, dst = jason ? 2 : ((n % 2) + 2) % 2;
-          const py = pods[dst][0] + 32;
-          const pts = [[2, ey + 72], [ex, ey + 72], [ex + 50, R[row]], [ex + ew, R[row]], [rx + 8, py]];
-          const m = walk(pts, [[0, 0.6], [0.6, 1.0], [1.3, 1.7], [1.7, 2.3]], r);
-          if (r > 0.8 && r < 1.5) hot[row] = true;
-          if (r > 2.2) fill[dst] = 1;
-          ball(ctx, m.p, jason ? U.purple : U.blue);
-        }
-        ['jason → v2', '그 외 → v1'].forEach((s, j) => {
-          C.box(ctx, ex + 8, R[j] - 15, ew - 16, 30, { fill: '#fff', on: hot[j] });
-          C.text(ctx, `${j + 1}. ${s}`, ex + 16, R[j] + 0.5, { size: 10, weight: 600, color: hot[j] ? U.accent : U.text, base: 'middle' });
-        });
-        pods.forEach(([y, v], j) => C.card(ctx, { x: rx + 8, y: y + 16, w: rw - 16, h: 38, t: `${v} 파드`, s: `version: ${v}`, size: 11 }, { lit: fill[j] > 0, fill: v === 'v2' ? '#faf5ff' : '#fff' }));
-        say('productpage의 Envoy가 end-user 헤더가 jason인 요청은 v2로, 나머지는 v1으로 보낸다.');
-      },
-    });
-  });
-
-  // Demo: the same buggy v2 behind weight 100 or weight 10; failures land in a 40-cell grid.
-  fig('istio-canary', (root) => {
-    const N = 40, GAP = 0.22, END = 0.3 + N * GAP + 1.2;
-    const MODES = [{ pill: '전부 v2로 교체', v2: () => true, w: 100 }, { pill: '카나리 v2 10%', v2: (n) => n % 10 === 4, w: 10 }];
-    hwa.scene(root, {
-      height: 250, still: 0,
-      notes: ['v2로 한 번에 바꾸면 요청 40건이 모두 v2의 버그를 만난다.', '10%만 v2로 보내면 같은 버그라도 4건만 실패한다.'],
-      demo: { modes: MODES.map((m) => m.pill), run: 'v2 배포하기' },
-      frame: (ctx, w, h, time, say, ui) => {
-        const M = MODES[ui.mode], run = ui.runAt === null ? -1 : time - ui.runAt;
-        const ex = 40, ew = Math.min(170, w * 0.38), rw = Math.min(200, w - ex - ew - 28), rx = w - rw, cy = 92;
-        const v1 = { x: rx, y: 42, w: rw, h: 40, t: 'v1 파드', s: `${100 - M.w}%` }, v2 = { x: rx, y: 104, w: rw, h: 40, t: 'v2 파드', s: `${M.w}%, 버그 있음` };
-        let fail = 0;
-        const cells = [];
-        for (let n = 0; n < N; n++) {
-          const r = run - 0.3 - n * GAP, to2 = M.v2(n);
-          if (r < 0) break;
-          const dst = to2 ? v2 : v1, pts = [[2, cy], [ex + ew / 2, cy], [dst.x + 6, dst.y + dst.h / 2]];
-          if (r < 0.9) ball(ctx, walk(pts, [[0, 0.45], [0.45, 0.9]], r).p, U.blue, 4);
-          else { cells.push(to2 ? 2 : 1); if (to2) fail++; }
-        }
-        C.pill(ctx, 0, 0, M.pill, ui.mode ? 'ok' : 'warn');
-        C.text(ctx, `실패 ${fail}건`, w, 11, { size: 11, weight: 700, color: fail ? U.red : U.muted, align: 'right', base: 'middle' });
-        C.text(ctx, '요청', 0, cy - 12, { size: 10, weight: 600, color: U.text });
-        C.card(ctx, { x: ex, y: 54, w: ew, h: 76, t: 'Envoy', s: 'weight' }, tone(PROXY));
-        const bx = ex + 12, bw = ew - 24, by = 112;
-        ctx.fillStyle = U.blue; ctx.fillRect(bx, by, bw * (100 - M.w) / 100, 8);
-        ctx.fillStyle = U.red; ctx.fillRect(bx + bw * (100 - M.w) / 100, by, bw * M.w / 100, 8);
-        C.card(ctx, v1, { dim: M.w === 100, fill: M.w === 100 ? U.plot : '#fff' });
-        C.card(ctx, v2, { stroke: BAD[2] });
-        const cols = 20, s = Math.min(14, Math.floor((w - (cols - 1) * 3) / cols)), gy = 178;
-        C.text(ctx, '요청 40건의 결과', 0, gy - 10, { size: 10 });
-        for (let n = 0; n < N; n++) {
-          const x = (n % cols) * (s + 3), y = gy + Math.floor(n / cols) * (s + 3);
-          ctx.fillStyle = cells[n] === 2 ? U.red : cells[n] === 1 ? '#22c55e' : U.cell;
-          ctx.beginPath(); ctx.roundRect(x, y, s, s, 3); ctx.fill();
-        }
-        if (run < 0) hint(ctx, 'v2 배포하기 버튼을 눌러 보자', w / 2, gy + 2 * s + 24);
-        if (run >= END) C.stamp(ctx, w / 2, gy + s + 2, ui.mode ? '4건만 실패' : '40건 모두 실패', ui.mode ? 'ok' : 'bad', (run - END) / 0.4);
-        say(`${M.pill}. 실패 ${fail}건.`);
-      },
-    });
-  });
-
   // Lanes on a time axis: blocks for work, arrows for waits (a slim version of the timeline in cpu.js).
-  const FILL = { slow: '#f59e0b', ok: U.blue, l7: '#8b5cf6', l4: '#14b8a6', net: '#cbd5e1' };
+  const FILL = { slow: '#f59e0b', ok: U.blue };
   const ARC = { wait: '#94a3b8', late: U.red };
   const dbl = (ctx, x0, x1, y, color) => {
     if (x1 - x0 < 6) return;
@@ -400,7 +180,6 @@
         const { i } = hwa.loop(time, SEC, HOLD, n), s = scenes[i], run = (time % ((SEC + HOLD) * n)) - i * (SEC + HOLD);
         const k = Math.max(0, Math.min(1, run / SEC)), t = k * s.span;
         C.pill(ctx, 0, 0, s.pill, s.tone);
-        if (s.legend) legendRight(ctx, w, s.legend.map(([kind, label]) => [label, FILL[kind]]));
         const x0 = Math.min(lw, w * 0.26), x1 = w - 8, top = 40, base = top + s.lanes.length * LH + 4;
         const X = (v) => x0 + (Math.max(0, Math.min(v, s.span)) / s.span) * (x1 - x0), ly = (j) => top + j * LH;
         s.lanes.forEach((name, j) => C.text(ctx, name, 0, ly(j) + LH / 2, { size: 10, weight: 600, color: U.text, base: 'middle' }));
@@ -421,7 +200,7 @@
           const y = ly(j) + 8, bx = X(a) + 1, bw = X(Math.min(t, b)) - bx - 1;
           if (bw <= 0) return;
           ctx.beginPath(); ctx.roundRect(bx, y, bw, LH - 16, Math.min(6, bw / 2)); ctx.fillStyle = FILL[kind]; ctx.fill();
-          if (t >= b && label && tw(ctx, label, 10, 700) + 8 < bw) C.text(ctx, label, bx + bw / 2, y + (LH - 16) / 2 + 0.5, { size: 10, weight: 700, color: kind === 'net' ? U.text : '#fff', align: 'center', base: 'middle' });
+          if (t >= b && label && tw(ctx, label, 10, 700) + 8 < bw) C.text(ctx, label, bx + bw / 2, y + (LH - 16) / 2 + 0.5, { size: 10, weight: 700, color: '#fff', align: 'center', base: 'middle' });
         });
         if (s.event && t >= s.event[0]) C.event(ctx, X(s.event[0]), top + 4, base, s.event[1], U.red, X(s.event[0]) - x0 < 40 ? 'left' : 'center');
         if (k > 0 && k < 1) C.dashed(ctx, X(t), top - 4, X(t), base, U.now);
@@ -437,16 +216,6 @@
     { pill: '타임아웃 없음', tone: 'bad', span: 3000, lanes: rl, ticks: rt, segs: [[1, 0, 3000, 'slow', '느린 응답']], arcs: [[0, 0, 3000, 'late', '응답 대기']], stamp: ['3초 대기', 'bad'], say: '타임아웃이 없으면 느린 파드에 걸린 요청을 끝까지 기다린다.' },
     { pill: 'perTryTimeout 500ms, 재시도', tone: 'ok', span: 3000, lanes: rl, ticks: rt, segs: [[1, 0, 500, 'slow', ''], [2, 530, 650, 'ok', '']], arcs: [[0, 0, 650, 'wait', '']], event: [500, '시도 끊음'], stamp: ['650ms에 성공', 'ok'], say: '500ms에 첫 시도를 끊고 다시 보내, 다른 파드가 받아 650ms에 끝난다.' },
   ]);
-
-  // Proxies a request passes in each data plane mode. Lengths are shape only, not measurements.
-  timeline('istio-latency', [
-    {
-      pill: '요청 하나가 지나는 프록시', tone: 'info', span: 36, lanes: ['메시 없음', '사이드카', 'ambient L4', 'ambient L7'],
-      legend: [['l7', 'L7'], ['l4', 'L4'], ['net', '네트워크']],
-      segs: [[0, 0, 10, 'net', ''], [1, 0, 12, 'l7', 'Envoy'], [1, 12, 22, 'net', ''], [1, 22, 34, 'l7', 'Envoy'], [2, 0, 3, 'l4', ''], [2, 3, 13, 'net', ''], [2, 13, 16, 'l4', ''], [3, 0, 3, 'l4', ''], [3, 3, 8, 'net', ''], [3, 8, 20, 'l7', 'waypoint'], [3, 20, 25, 'net', ''], [3, 25, 28, 'l4', '']],
-      say: '사이드카는 L7 프록시를 두 번, ambient L4는 가벼운 L4 처리만 두 번, waypoint를 붙이면 L7을 한 번 지난다.',
-    },
-  ], { SEC: 6, LH: 40, lw: 76 });
 
   // Demo: pod 2 answers 503 after 3s. Without outlier detection its requests hold the order service's threads; with it, pod 2 is ejected after 3 errors in a row.
   fig('istio-breaker', (root) => {
@@ -521,8 +290,8 @@
     const PILL = [['mTLS', 'info'], ['PERMISSIVE', 'warn'], ['STRICT', 'ok']];
     const notes = [
       '사이드카가 있는 파드끼리는 인증서를 주고받는 mTLS로 연결하고, 받는 쪽이 sa/orders 신원을 확인한다.',
-      'PERMISSIVE(기본값)는 사이드카 없는 파드의 평문 요청도 받아 앱까지 넘긴다.',
-      'STRICT는 mTLS만 받아, 사이드카 없는 파드의 평문 요청을 Envoy에서 끊는다.',
+      'PERMISSIVE(기본값)에는 평문용 필터 체인도 있어서, 사이드카 없는 파드의 평문 요청이 앱까지 간다.',
+      'STRICT에는 평문용 필터 체인이 없어서, 사이드카 없는 파드의 평문 요청이 Envoy에서 끊긴다.',
     ];
     hwa.scene(root, {
       height: 252, still: S.still, scenes: S, notes,
@@ -557,50 +326,6 @@
         if (i === 1) C.stamp(ctx, w / 2, 234, '평문도 통과', 'warn', (run - 5) / 0.4);
         if (i === 2) C.stamp(ctx, w / 2, 234, '평문은 Envoy에서 끊김', 'ok', (run - 5) / 0.4);
         say(`${PILL[i][0]}. ${notes[i]}`);
-      },
-    });
-  });
-
-  // Metrics come from every Envoy on their own; a trace stays one line only if each app forwards the trace headers.
-  fig('istio-observe', (root) => {
-    const S = seq([6, 6], 1.8);
-    const notes = [
-      '앱이 받은 traceparent를 다음 요청에 실으면 A, B, C 구간이 한 추적으로 이어진다.',
-      'B가 헤더를 빠뜨리면 C는 새 추적으로 잡혀 둘로 끊긴다. 지표는 그래도 세 Envoy에서 쌓인다.',
-    ];
-    hwa.scene(root, {
-      height: 262, still: S.still, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = S.pos(time);
-        C.pill(ctx, 0, 0, i ? 'B가 헤더 누락' : '헤더 전달', i ? 'bad' : 'ok');
-        const got = (t > 0.6) + (t > 1.6) + (t > 2.9);
-        C.text(ctx, `istio_requests_total +${got}`, w, 11, { size: 10, weight: 600, color: U.text, align: 'right', base: 'middle' });
-        const g = 26, cw = (w - 2 * g) / 3, cy = 36, cx = (j) => j * (cw + g);
-        ['주문 A', '결제 B', '재고 C'].forEach((s, j) => C.card(ctx, { x: cx(j), y: cy, w: cw, h: 46, t: s, s: 'Envoy' }, { lit: Math.abs(t - [0.6, 1.6, 2.9][j]) < 0.4 }));
-        [0, 1].forEach((j) => {
-          const a = [cx(j) + cw + 2, cy + 23], b = [cx(j + 1) - 2, cy + 23], [s0, s1] = j ? [1.9, 2.9] : [0.6, 1.6];
-          C.arrow(ctx, [a, b], ease(t, s0, s1), '#94a3b8', { width: 1.2 });
-          const miss = i && j;
-          if (t > s0) tag(ctx, miss ? '헤더 없음' : 'traceparent', (a[0] + b[0]) / 2, cy + 64, miss ? BAD : BLUE, ease(t, s0, s0 + 0.4));
-        });
-        const ty = 120;
-        C.box(ctx, 0, ty, w, h - ty - 2, { fill: U.plot });
-        C.text(ctx, '추적 화면', 10, ty + 18, { size: 11, weight: 600, color: U.text });
-        const lx = 70, X = (v) => lx + (w - lx - 12) * v;
-        const spans = [[0, 0, 1, 'A', 0.6], [1, 0.12, 0.85, 'B', 1.6], [2, 0.3, 0.7, 'C', 2.9]];
-        spans.forEach(([j, a, b, s, at]) => {
-          const k = ease(t, at, at + 0.8);
-          if (k <= 0) return;
-          const split = i && j === 2, y = ty + 32 + j * 24 + (split ? 22 : 0), x0 = split ? X(0) : X(a), x1 = split ? X(b - a) : X(b);
-          ctx.fillStyle = split ? U.red : [U.blue, '#6366f1', '#8b5cf6'][j];
-          ctx.beginPath(); ctx.roundRect(x0, y, Math.max(2, (x1 - x0) * k), 16, 4); ctx.fill();
-          C.text(ctx, s, x0 + 8, y + 8.5, { size: 10, weight: 700, color: '#fff', base: 'middle' });
-        });
-        C.text(ctx, 'trace 1', 10, ty + 40, { size: 10, weight: 600 });
-        if (i && t > 2.9) C.text(ctx, 'trace 2', 10, ty + 110, { size: 10, weight: 600, color: U.red });
-        const ss = i ? '추적 끊김' : '한 줄로 이어짐';
-        C.stamp(ctx, w - tw(ctx, ss, 13, 700) / 2 - 22, ty + 16, ss, i ? 'bad' : 'ok', (run - 6) / 0.4);
-        say(notes[i]);
       },
     });
   });

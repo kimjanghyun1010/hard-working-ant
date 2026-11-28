@@ -1,4 +1,4 @@
-// TLS post figures: roles, keys, handshake, cipher suites, certificates, revocation, private CA, Kubernetes.
+// TLS post figures: key agreement, handshake, cipher negotiation, chain, revocation, lifetime, Kubernetes.
 (() => {
   const U = hwa.ui, C = hwa.cv, TAU = Math.PI * 2;
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -62,45 +62,6 @@
   };
   const hint = (ctx, w, y, demo) => C.text(ctx, `${demo.run} 버튼을 눌러 보자`, w / 2, y, { size: 12, align: 'center', base: 'middle' });
   const fig = (id, make) => document.querySelectorAll(`[data-figure="tls-certificate-${id}"]`).forEach((root) => hwa.scene(root, make(root)));
-
-  // Same packet over HTTP and HTTPS past a man in the middle: read, altered, impersonated.
-  fig('roles', () => {
-    const SEC = 6.4, HOLD = 1.8, TOP = 30, LH = 112;
-    const S = [
-      { pill: '엿보기', at: 'mid', note: '엿보기: HTTP 비밀번호는 중간에서 그대로 읽히고, HTTPS는 암호문만 보인다.', lanes: [
-        { send: ['pw=1234', BLUE], see: ['pw=1234 읽음', RED], next: ['pw=1234', BLUE], stamp: ['비밀번호 노출', 'bad'] },
-        { send: ['x9f#2a', PURPLE, lock], see: ['암호문만 보임', MUTE], next: ['x9f#2a', PURPLE, lock], stamp: ['못 읽음', 'ok'] }] },
-      { pill: '변조', at: 'srv', note: '변조: HTTP는 바뀐 금액이 그대로 처리되고, HTTPS는 서버가 변조를 알아채 연결을 끊는다.', lanes: [
-        { send: ['1만원 송금', BLUE], see: ['100만원으로 바꿈', RED], next: ['100만원 송금', RED], stamp: ['바뀐 채 처리', 'bad'] },
-        { send: ['c71e0b', PURPLE, lock], see: ['몇 바이트 바꿈', RED], next: ['c71e0b', RED, lock], stamp: ['변조 감지, 연결 끊음', 'ok'] }] },
-      { pill: '사칭', at: 'br', back: true, note: '사칭: HTTP는 가짜 서버의 화면을 띄우고, HTTPS는 인증서가 맞지 않아 연결을 끊는다.', lanes: [
-        { send: ['GET /login', BLUE], see: ['서버인 척 응답', RED], next: ['가짜 로그인 화면', RED], stamp: ['가짜 화면 표시', 'bad'] },
-        { send: ['ClientHello', BLUE], see: ['서버인 척 응답', RED], next: ['가짜 인증서', RED], stamp: ['인증서 불일치, 차단', 'ok'] }] },
-    ];
-    return {
-      height: TOP + 2 * LH - 6, still: 2 * (SEC + HOLD) + SEC + 0.5, scenes: hwa.loopScenes(SEC, HOLD, 3), notes: S.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, k } = hwa.loop(time, SEC, HOLD, 3), sc = S[i], bw = clamp(w * 0.2, 62, 110);
-        const X = { br: [8, 8 + bw], mid: [(w - bw) / 2, (w + bw) / 2], srv: [w - 8 - bw, w - 8] };
-        const p1 = mv(k, 0.05, 0.36), seen = mv(k, 0.36, 0.46), p2 = mv(k, 0.55, 0.85), done = (k - 0.88) / 0.08;
-        C.pill(ctx, 0, 0, sc.pill, 'info');
-        sc.lanes.forEach((ln, j) => {
-          const y0 = TOP + j * LH, cy = y0 + 46;
-          C.group(ctx, 0, y0, w, LH - 10, j ? 'HTTPS' : 'HTTP');
-          C.line(ctx, [[X.br[1], cy], [X.srv[0], cy]], '#e2e8f0', 1);
-          C.card(ctx, { x: X.br[0], y: cy - 18, w: bw, h: 36, t: '브라우저' }, { lit: sc.at === 'br' && done > 0 });
-          C.card(ctx, { x: X.mid[0], y: cy - 18, w: bw, h: 36, t: '중간자' }, { fill: RED[0], stroke: RED[2], dash: [4, 3] });
-          C.card(ctx, { x: X.srv[0], y: cy - 18, w: bw, h: 36, t: '서버' }, sc.back ? { dim: true, dash: [4, 3], fill: U.plot } : { lit: sc.at === 'srv' && done > 0 });
-          fly(ctx, ln.send[0], [X.br[1], cy], [X.mid[0], cy], p1, ln.send[1], ln.send[2]);
-          tag(ctx, ln.see[0], w / 2, cy - 31, ln.see[1], { a: seen });
-          if (sc.back) fly(ctx, ln.next[0], [X.mid[0], cy], [X.br[1], cy], p2, ln.next[1], ln.next[2]);
-          else fly(ctx, ln.next[0], [X.mid[1], cy], [X.srv[0], cy], p2, ln.next[1], ln.next[2]);
-          stamp(ctx, w, (X[sc.at][0] + X[sc.at][1]) / 2, cy + 36, ln.stamp[0], ln.stamp[1], done);
-        });
-        say(`${sc.pill}. ${sc.note}`);
-      },
-    };
-  });
 
   // Browser and server either side of the network: symmetric key, key agreement, signature.
   fig('keys', () => {
@@ -207,56 +168,6 @@
     };
   });
 
-  // Four roles of a cipher suite: TLS 1.2 names all four, TLS 1.3 names two and leaves two to extensions.
-  fig('suite', () => {
-    const SEC = 6.6, HOLD = 2;
-    const ROLE = [['키 합의', BLUE], ['서명', PURPLE], ['데이터 암호화', GREEN], ['해시', ORANGE]];
-    const S = [
-      { pill: 'TLS 1.2', parts: [['ECDHE', 0], ['-'], ['RSA', 1], ['-'], ['AES128-GCM', 2], ['-'], ['SHA256', 3]], ext: [], stamp: ['이름 하나가 네 칸', 'info'],
-        note: 'TLS 1.2: 이름의 네 조각이 키 합의, 서명, 데이터 암호화, 해시를 모두 정한다.' },
-      { pill: 'TLS 1.3', parts: [['TLS_'], ['AES_128_GCM', 2], ['_'], ['SHA256', 3]], ext: [[0, 'X25519MLKEM768', 'supported_groups'], [1, 'ecdsa_secp256r1_sha256', 'signature_algorithms']], stamp: ['이름은 두 칸만', 'info'],
-        note: 'TLS 1.3: 이름은 데이터 암호화와 해시만 정하고, 키 합의와 서명은 확장 칸에서 따로 고른다.' },
-    ];
-    const NY = 46, RY = (r) => 88 + r * 40;
-    return {
-      height: RY(3) + 58, still: SEC + HOLD + SEC + 0.5, scenes: hwa.loopScenes(SEC, HOLD, 2), notes: S.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, k } = hwa.loop(time, SEC, HOLD, 2), sc = S[i], lw = 104;
-        C.pill(ctx, 0, 0, sc.pill, 'info');
-        C.text(ctx, 'cipher suite 이름', w, 11, { size: 10, align: 'right', base: 'middle' });
-        const total = sc.parts.reduce((a, [s]) => a + tw(ctx, s, 13, 700), 0);
-        let x = (w - total) / 2, order = 0;
-        const flights = [];
-        sc.parts.forEach(([s, r]) => {
-          const pw = tw(ctx, s, 13, 700);
-          C.text(ctx, s, x, NY, { size: 13, weight: 700, color: r === undefined ? U.muted : ROLE[r][1][1], base: 'middle' });
-          if (r !== undefined) flights.push([s, r, [x + pw / 2, NY], mv(k, 0.12 + order * 0.13, 0.32 + order * 0.13)]), order++;
-          x += pw;
-        });
-        ROLE.forEach(([name, col], r) => {
-          const y = RY(r), ext = sc.ext.find((e) => e[0] === r);
-          C.box(ctx, lw, y - 15, w - lw, 30, { fill: U.plot, r: 6 });
-          C.text(ctx, name, 0, ext ? y - 6 : y, { size: 11, weight: 600, color: U.text, base: 'middle' });
-          if (ext) C.text(ctx, ext[2], 0, y + 9, { size: 9, base: 'middle' });
-          const fromName = flights.find((f) => f[1] === r);
-          if (!fromName && !ext) return;
-          if (ext) {
-            const f = mv(k, 0.62 + r * 0.1, 0.78 + r * 0.1), tx = lw + 10 + tagW(ctx, ext[1]) / 2;
-            if (f <= 0) C.text(ctx, '이름에 없음', lw + 10, y, { size: 10, base: 'middle' });
-            tag(ctx, ext[1], tx + (1 - f) * 30, y, col, { a: f });
-          }
-        });
-        flights.forEach(([s, r, from, f]) => {
-          const to = [lw + 10 + tagW(ctx, s) / 2, RY(r)];
-          if (f >= 1) tag(ctx, s, ...to, ROLE[r][1]);
-          else if (f > 0) tag(ctx, s, ...mix(from, to, f), ROLE[r][1]);
-        });
-        stamp(ctx, w, w / 2, RY(3) + 40, sc.stamp[0], sc.stamp[1], (k - 0.9) / 0.06);
-        say(`${sc.pill}. ${sc.note}`);
-      },
-    };
-  });
-
   // Client offer against nginx's list, scanned in client order (ssl_prefer_server_ciphers off).
   fig('negotiate', () => {
     const SEC = 6, HOLD = 2;
@@ -303,57 +214,6 @@
         const end = win(last)[1] + 0.08;
         stamp(ctx, w, w / 2, RY(3) + 18, sc.stamp, mi < 0 ? 'bad' : 'ok', (k - end) / 0.06);
         say(`${sc.pill}, ${sc.c[0]}. ${sc.note}`);
-      },
-    };
-  });
-
-  // Fields of one server certificate filled in turn, with what the client checks in each.
-  fig('fields', () => {
-    const ROWS = [
-      ['주체', 'CN=shop.example.com', '이름 확인에 CN은 쓰지 않는다'],
-      ['SAN', 'shop.example.com, *.shop.example.com', '접속한 주소가 여기 있는지'],
-      ['공개키', 'ECDSA P-256', '핸드셰이크 서명을 이 키로 검증'],
-      ['발급자', 'CN=Example Issuing CA', '발급자 인증서를 찾아 체인을 잇는다'],
-      ['유효기간', '2026-11-01 ~ 2027-05-19', '오늘이 기간 안인지'],
-      ['용도', 'serverAuth, CA:FALSE', '서버 인증용이고 CA가 아닌지'],
-      ['서명', 'ecdsa-with-SHA256', '발급자 공개키로 위 내용을 검증'],
-    ];
-    const N = ROWS.length, STEP = 1.3, HOLDS = 3, TOP = 30, RH = 26, RY = (j) => TOP + 36 + j * RH;
-    return {
-      height: RY(N) + 40, still: N * STEP + 1,
-      frame: (ctx, w, h, time, say) => {
-        const s = hwa.steps(time, N, STEP, HOLDS), cur = s.done ? -1 : s.active;
-        C.pill(ctx, 0, 0, cur < 0 ? '서버 인증서 (X.509)' : ROWS[cur][0], 'info');
-        C.box(ctx, 0, TOP, w, RY(N) - TOP + 4, { fill: '#fff' });
-        C.text(ctx, '서버 인증서', 12, TOP + 18, { size: 11, weight: 600, color: U.text });
-        const lw = 64;
-        ROWS.forEach(([name, val], j) => {
-          const a = s.k(j), y = RY(j) + RH / 2;
-          if (j === cur) C.box(ctx, 4, RY(j), w - 8, RH - 2, { on: true, r: 5 });
-          C.text(ctx, name, 12, y, { size: 10, weight: 600, color: a > 0 ? U.text : '#cbd5e1', base: 'middle' });
-          ctx.globalAlpha = a;
-          C.text(ctx, val, lw + 8, y, { size: 10, color: j === N - 1 ? PURPLE[1] : U.text, base: 'middle' });
-          ctx.globalAlpha = 1;
-        });
-        // Signature covers every field above it.
-        if (s.k(N - 1) > 0) {
-          const bx = w - 10, a = s.k(N - 1);
-          ctx.globalAlpha = a;
-          C.line(ctx, [[bx - 4, RY(0) + 4], [bx, RY(0) + 4], [bx, RY(N - 1) - 2], [bx - 4, RY(N - 1) - 2]], PURPLE[2], 1.2);
-          C.text(ctx, '서명 대상', bx - 6, TOP + 18, { size: 9, weight: 600, color: PURPLE[1], align: 'right' });
-          ctx.globalAlpha = 1;
-        }
-        const ly = RY(N) + 24;
-        if (cur >= 0) {
-          C.text(ctx, '확인', 0, ly, { size: 10, weight: 700, color: U.accent, base: 'middle' });
-          C.text(ctx, ROWS[cur][2], 30, ly, { size: 11, weight: 600, color: U.text, base: 'middle' });
-        } else {
-          C.box(ctx, 0, ly - 13, w, 26, { fill: U.plot, dash: [4, 3], r: 6 });
-          const fp = '지문 = 인증서 전체의 SHA-256 해시', fp2 = '인증서 안에 없는 값';
-          C.text(ctx, fp, 10, ly + 0.5, { size: 10, weight: 600, color: U.text, base: 'middle' });
-          if (tw(ctx, fp, 10, 600) + tw(ctx, fp2, 10) + 34 < w) C.text(ctx, fp2, w - 10, ly + 0.5, { size: 10, align: 'right', base: 'middle' });
-        }
-        say(cur < 0 ? '서버 인증서의 일곱 칸. 지문은 인증서 전체의 해시라 인증서 안에 없다.' : `${ROWS[cur][0]}: ${ROWS[cur][1]}. 확인: ${ROWS[cur][2]}.`);
       },
     };
   });
@@ -410,17 +270,17 @@
     };
   });
 
-  // Demo: the client asks the CA's OCSP responder itself, or the server staples a response it fetched earlier.
+  // The client asks the CA's OCSP responder itself, or the server staples a response it fetched earlier.
   fig('revocation', () => {
-    const SEC = 6.4, HOLD = 2, TOP = 30, demo = { modes: ['직접 확인', 'OCSP stapling'], run: '접속하기' };
+    const SEC = 6.4, HOLD = 2, TOP = 30, MODES = ['직접 확인', 'OCSP stapling'];
     const notes = [
       '직접 확인: 핸드셰이크 중에 CA까지 한 번 더 다녀오고, CA에는 누가 어느 사이트에 접속하는지 남는다.',
       'stapling: 서버가 미리 받아 둔 OCSP 응답을 인증서와 같이 보내서 추가 왕복이 없다.',
     ];
     return {
-      height: TOP + 236, still: SEC + HOLD + SEC + 0.5, notes, demo: demo,
+      height: TOP + 236, still: SEC + HOLD + SEC + 0.5, scenes: hwa.loopScenes(SEC, HOLD, 2), notes,
       frame: (ctx, w, h, time, say, ui) => {
-        const { i, run } = play(time, ui, demo, SEC, HOLD, 2), k = clamp(run / SEC), staple = i === 1;
+        const { i, run } = play(time, ui, null, SEC, HOLD, 2), k = clamp(run / SEC), staple = i === 1;
         const cw = clamp(w * 0.3, 96, 140), cax = Math.round(w * 0.36), CY = TOP + 140;
         const cl = { x: 0, y: CY - 20, w: cw, h: 40, t: '클라이언트', s: '203.0.113.7' }, sv = { x: w - cw, y: CY - 20, w: cw, h: 40, t: '서버', s: 'shop.example.com' };
         const caB = TOP + 74, L = [cw, CY], R = [w - cw, CY], caP = [cax + 24, caB], clT = [cw - 16, CY - 20], svT = [w - cw / 2, CY - 20];
@@ -459,8 +319,8 @@
             if (k >= 0.4 && k < 0.72) tag(ctx, '대기', cw / 2, CY + 38, ORANGE);
           }
           stamp(ctx, w, w / 2, h - 16, staple ? '추가 왕복 없음' : '왕복 +1, 접속 기록 남음', staple ? 'ok' : 'bad', (k - 0.84) / 0.08);
-        } else hint(ctx, w, h - 16, demo);
-        say(`${demo.modes[i]}. ${notes[i]}`);
+        }
+        say(`${MODES[i]}. ${notes[i]}`);
       },
     };
   });
@@ -500,59 +360,6 @@
         if (k < 1) C.dashed(ctx, X(cx), Y0, X(cx), Y0 + H, U.now);
         stamp(ctx, w, (x0 + x1) / 2, Y(300), '2029년부터 47일', 'warn', (time % (SEC + HOLD) - SEC) / 0.4);
         say(`${pill}. Let's Encrypt 기본 ${ends[1].v}일.`);
-      },
-    };
-  });
-
-  // Private CA: make the CA, sign a server CSR, then hand ca.crt to clients. Private keys never move.
-  fig('private-ca', () => {
-    const SEC = 6.4, HOLD = 2, TOP = 30;
-    const S = [
-      { pill: 'CA 만들기', stamp: 'CA 준비', note: 'CA 개인키를 만들고, 그 키로 자기 인증서(CA:TRUE)에 직접 서명한다.' },
-      { pill: '서버 인증서 발급', stamp: 'CA가 서명', note: '서버가 만든 CSR이 CA로 가고, CA가 서명한 server.crt가 서버로 돌아온다.' },
-      { pill: '신뢰와 접속', stamp: '신뢰 성립', note: '클라이언트는 ca.crt 한 장만 신뢰하고, 서버가 내민 server.crt의 서명을 그것으로 확인한다.' },
-    ];
-    const RY = [TOP + 46, TOP + 96, TOP + 146];
-    return {
-      height: TOP + 210, still: 2 * (SEC + HOLD) + SEC + 0.5, scenes: hwa.loopScenes(SEC, HOLD, 3), notes: S.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, k } = hwa.loop(time, SEC, HOLD, 3), cw = (w - 16) / 3, cx = (c) => c * (cw + 8) + cw / 2;
-        C.pill(ctx, 0, 0, S[i].pill, 'info');
-        ['CA', '서버', '클라이언트'].forEach((s, c) => C.group(ctx, c * (cw + 8), TOP, cw, 166, s));
-        const sub = (s, x, y, a = 1) => { ctx.globalAlpha = a; C.text(ctx, s, x, y + 17, { size: 9, align: 'center', base: 'middle' }); ctx.globalAlpha = 1; };
-        // CA column.
-        const caKey = i ? 1 : mv(k, 0.08, 0.2), caCrt = i ? 1 : mv(k, 0.45, 0.58);
-        tag(ctx, 'ca.key', cx(0), RY[0], PURPLE, { a: caKey, icon: key });
-        if (i === 0) C.arrow(ctx, [[cx(0), RY[0] + 11], [cx(0), RY[1] - 11]], mv(k, 0.25, 0.45), PURPLE[1], { width: 1.4 });
-        tag(ctx, 'ca.crt', cx(0), RY[1], GREEN, { a: caCrt });
-        sub('CA:TRUE', cx(0), RY[1], caCrt);
-        if (i === 0 && k > 0.3 && k < 0.6) sub('자체 서명', cx(0), RY[0] + 8);
-        // Server column.
-        if (i >= 1) {
-          tag(ctx, 'server.key', cx(1), RY[0], PURPLE, { a: i > 1 ? 1 : mv(k, 0.05, 0.15), icon: key });
-          tag(ctx, 'server.csr', cx(1), RY[1], i > 1 ? MUTE : BLUE, { a: i > 1 ? 1 : mv(k, 0.2, 0.3) });
-          sub('공개키, SAN', cx(1), RY[1], i > 1 ? 1 : mv(k, 0.2, 0.3));
-        }
-        if (i === 1) {
-          fly(ctx, 'server.csr', [cx(1), RY[1]], [cx(0), RY[2]], mv(k, 0.36, 0.55), BLUE);
-          const sign = mv(k, 0.58, 0.68);
-          if (k >= 0.55 && k < 0.72) { tag(ctx, 'server.csr', cx(0), RY[2], BLUE, { a: 1 - sign }); tag(ctx, 'server.crt', cx(0), RY[2], GREEN, { a: sign }); }
-          if (k >= 0.55 && k < 0.72) C.arrow(ctx, [[cx(0) - cw / 2 + 12, RY[0] + 4], [cx(0) - cw / 2 + 12, RY[2] - 4]], sign, PURPLE[1], { width: 1.2 });
-          fly(ctx, 'server.crt', [cx(0), RY[2]], [cx(1), RY[2]], mv(k, 0.72, 0.86), GREEN);
-          tag(ctx, 'server.crt', cx(1), RY[2], GREEN, { a: k >= 0.86 ? 1 : 0 });
-        }
-        if (i === 2) {
-          tag(ctx, 'server.crt', cx(1), RY[2], GREEN);
-          fly(ctx, 'ca.crt', [cx(0), RY[1]], [cx(2), RY[0]], mv(k, 0.08, 0.32), GREEN);
-          tag(ctx, 'ca.crt', cx(2), RY[0], GREEN, { a: k >= 0.32 ? 1 : 0 });
-          sub('신뢰 저장소', cx(2), RY[0], k >= 0.32 ? 1 : 0);
-          fly(ctx, 'server.crt', [cx(1), RY[2]], [cx(2), RY[1]], mv(k, 0.42, 0.6), GREEN);
-          tag(ctx, 'server.crt', cx(2), RY[1], BLUE, { a: k >= 0.6 ? 1 : 0 });
-          sub('접속할 때 받음', cx(2), RY[1], k >= 0.6 ? 1 : 0);
-          tag(ctx, '서명 확인', cx(2), RY[2], GREEN, { a: mv(k, 0.7, 0.78) });
-        }
-        stamp(ctx, w, w / 2, h - 16, S[i].stamp, 'ok', (k - 0.86) / 0.08);
-        say(`${S[i].pill}. ${S[i].note}`);
       },
     };
   });

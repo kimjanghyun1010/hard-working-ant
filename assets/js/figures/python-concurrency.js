@@ -1,4 +1,4 @@
-// Python concurrency post: GIL, asyncio event loop, ASGI, FastAPI thread pool, workers and CPU request.
+// Python concurrency post: GIL, I/O waits, asyncio event loop, FastAPI thread pool, workers and CPU request.
 (() => {
   const U = hwa.ui, C = hwa.cv;
   const FILL = { cpu: U.blue, cpu2: '#8b5cf6', db: '#64748b', heavy: '#f59e0b', gil: '#14b8a6', s1: '#3b82f6', s2: '#8b5cf6', s3: '#14b8a6', s4: '#f59e0b' };
@@ -30,14 +30,6 @@
       ctx.fillStyle = color; ctx.fill();
     });
   };
-  // Scenes of unequal length, each followed by the same hold.
-  const seq = (lens, hold) => {
-    const L = lens.map((l) => l + hold), T = L.reduce((a, b) => a + b, 0);
-    const at = (i) => L.slice(0, i).reduce((a, b) => a + b, 0);
-    const of = (time) => { let x = time % T, i = 0; while (i < L.length - 1 && x >= L[i]) x -= L[i++]; return i; };
-    return { n: lens.length, at, of, pos: (time) => { const i = of(time), run = (time % T) - at(i); return { i, run, t: Math.min(run, lens[i]) }; } };
-  };
-
   // Timeline lanes: segs are blocks [lane, from, to, kind, label], arcs are waits drawn as double arrows.
   const LH = 44;
   const tl = (name, scenes, { SEC = 7, HOLD = 1.8, demo } = {}) => document.querySelectorAll(`[data-figure="${name}"]`).forEach((root) => {
@@ -138,24 +130,7 @@
       { pill: '스레드 4개', tone: 'bad', span: 400, lanes, ticks, legend, segs: turns, stamp: ['400ms에 끝남', 'bad'], say: '스레드 4개는 GIL을 번갈아 쥐어 vCPU가 한 번에 하나만 찬다. 일 400ms어치를 400ms에 끝낸다.' },
       { pill: '프로세스 4개', tone: 'ok', span: 400, lanes, ticks, legend, segs: ABCD.map((s, j) => [j, 0, 100, `s${j + 1}`, s]), stamp: ['100ms에 끝남', 'ok'], say: '프로세스마다 GIL이 따로 있어 vCPU 4개가 동시에 돌고 100ms에 끝난다.' },
     ], { demo: { modes: ['스레드 4개', '프로세스 4개'], run: '계산 4개 보내기' } });
-
-    // Same four computations on a free-threaded build, then with an extension that turns the GIL back on.
-    const fl = ['스레드 A', '스레드 B', '스레드 C', '스레드 D'];
-    tl('python-concurrency-freethread', [
-      { pill: 'free-threaded 빌드', tone: 'ok', span: 400, lanes: fl, ticks, segs: ABCD.map((s, j) => [j, 0, 108, `s${j + 1}`, '계산']), stamp: ['108ms에 끝남', 'ok'], say: 'GIL이 없으면 4개가 동시에 돈다. 단일 스레드가 조금 느려져 100ms 일이 108ms쯤 걸린다.' },
-      { pill: '미지원 C 확장 import', tone: 'bad', span: 400, lanes: fl, ticks, segs: turns, event: [0, 'GIL 다시 켜짐'], stamp: ['400ms에 끝남', 'bad'], say: 'free-threading 지원 표시가 없는 C 확장을 import하면 GIL이 다시 켜져 차례로 돈다.' },
-    ]);
   }
-
-  // count += 1 in two threads: a switch right after A reads loses one increment.
-  tl('python-concurrency-race', [
-    { pill: '전환 없이 차례로', tone: 'ok', span: 60, lanes: ['스레드 A', '스레드 B'], value: (t) => [`count = ${5 + (t >= 30) + (t >= 60)}`, 'info'],
-      segs: [[0, 0, 10, 'cpu', '5 읽음'], [0, 10, 20, 'cpu', '+1'], [0, 20, 30, 'cpu', '6 씀'], [1, 30, 40, 'cpu2', '6 읽음'], [1, 40, 50, 'cpu2', '+1'], [1, 50, 60, 'cpu2', '7 씀']],
-      arcs: [[1, 0, 30, 'wait', '차례 대기']], stamp: ['count 7', 'ok'], say: 'A가 읽고 더하고 쓴 뒤 B가 하면 5에서 7이 된다.' },
-    { pill: '읽은 직후 전환', tone: 'bad', span: 60, lanes: ['스레드 A', '스레드 B'], value: (t) => [`count = ${t >= 40 ? 6 : 5}`, t >= 60 ? 'bad' : 'info'],
-      segs: [[0, 0, 10, 'cpu', '5 읽음'], [1, 10, 20, 'cpu2', '5 읽음'], [1, 20, 30, 'cpu2', '+1'], [1, 30, 40, 'cpu2', '6 씀'], [0, 40, 50, 'cpu', '+1'], [0, 50, 60, 'cpu', '6 씀']],
-      arcs: [[0, 10, 40, 'late', '전환 대기'], [1, 0, 10, 'wait', '']], event: [10, '전환'], stamp: ['+1 두 번, count 6', 'bad'], say: 'A가 5를 읽은 직후 B로 넘어가면 둘 다 5에 1을 더해 6을 쓴다. 1이 사라진다.' },
-  ], { SEC: 6 });
 
   // Four requests of 5ms CPU, 80ms DB wait, 5ms CPU: one thread in series, four threads overlapping the waits.
   {
@@ -199,47 +174,6 @@
       arcs: [[0, 14, 204, 'idle', '다른 요청 받을 수 있음']], event: [10, 'B 도착'], stamp: ['B 바로 처리', 'ok'],
       say: 'await하면 루프가 A를 내려놓고 B를 바로 처리한다. DB가 쿼리에 쓰는 시간은 같다.' },
   ], { demo: { modes: ['동기 호출', 'await'], run: '요청 A 보내기' } });
-
-  // WSGI and ASGI as a sequence: lifelines for client, server and app, messages revealed one per step.
-  document.querySelectorAll('[data-figure="python-concurrency-asgi"]').forEach((root) => {
-    const STEP = 0.9, GAP = 28;
-    const SC = [
-      { pill: 'WSGI', tone: 'warn', heads: [['클라이언트'], ['Gunicorn', 'WSGI 서버'], ['Flask', '앱']], stamp: ['호출 1번, 응답 1번', 'warn'],
-        msgs: [[0, 1, 'HTTP 요청'], [1, 2, 'app(environ, start_response)'], [2, 1, 'return 응답 본문'], [1, 0, 'HTTP 응답']],
-        note: 'WSGI는 함수 호출 한 번에 응답 한 번으로 끝난다. 연결을 붙잡고 여러 번 주고받을 자리가 없다.' },
-      { pill: 'ASGI, HTTP', tone: 'info', heads: [['클라이언트'], ['Uvicorn', 'ASGI 서버'], ['FastAPI', '앱']], stamp: ['요청 1건이 이벤트 3개', 'info'],
-        msgs: [[0, 1, 'HTTP 요청'], [1, 2, 'app(scope, receive, send)'], [1, 2, 'http.request'], [2, 1, 'http.response.start'], [2, 1, 'http.response.body'], [1, 0, 'HTTP 응답']],
-        note: 'ASGI는 HTTP 요청도 이벤트로 나눠 주고받는다. 앱은 receive로 받고 send로 보낸다.' },
-      { pill: 'ASGI, WebSocket', tone: 'ok', heads: [['클라이언트'], ['Uvicorn', 'ASGI 서버'], ['FastAPI', '앱']], stamp: ['연결 동안 계속 주고받음', 'ok'],
-        msgs: [[0, 1, '연결 업그레이드'], [1, 2, 'websocket.connect'], [2, 1, 'websocket.accept'], [0, 1, '메시지'], [1, 2, 'websocket.receive'], [2, 1, 'websocket.send'], [1, 0, '메시지']],
-        note: 'WebSocket은 연결이 살아 있는 동안 이벤트를 계속 주고받는다. WSGI로는 담을 수 없다.' },
-    ];
-    const S = seq(SC.map((s) => s.msgs.length * STEP + 0.6), 1.8);
-    hwa.scene(root, {
-      height: 322, still: S.at(2) + SC[2].msgs.length * STEP + 1.2, scenes: S, notes: SC.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = S.pos(time), sc = SC[i], xs = [w * 0.12, w * 0.5, w * 0.88], hw = Math.min(104, w * 0.24);
-        C.pill(ctx, 0, 0, sc.pill, sc.tone);
-        sc.heads.forEach(([name, sub], j) => {
-          C.dashed(ctx, xs[j], 74, xs[j], h - 6, '#cbd5e1');
-          C.card(ctx, { x: xs[j] - hw / 2, y: 34, w: hw, h: 38, t: name, s: sub, size: 11 }, { fill: j === 2 ? BLUE[0] : '#fff', stroke: j === 2 ? BLUE[2] : U.grid });
-        });
-        sc.msgs.forEach(([a, b, label], m) => {
-          const k = ease(t, m * STEP, m * STEP + STEP * 0.6);
-          if (k <= 0) return;
-          const y = 100 + m * GAP, d = b > a ? 1 : -1, inner = a + b === 3, col = inner ? (d > 0 ? U.accent : U.blue) : '#94a3b8';
-          C.arrow(ctx, [[xs[a] + 4 * d, y], [xs[b] - 4 * d, y]], k, col, { width: inner ? 1.6 : 1.2 });
-          let size = 10;
-          while (size > 8 && tw(ctx, label, size, 600) > Math.abs(xs[b] - xs[a]) - 12) size--;
-          ctx.globalAlpha = k;
-          C.text(ctx, label, (xs[a] + xs[b]) / 2, y - 5, { size, weight: 600, color: inner ? U.text : U.muted, align: 'center' });
-          ctx.globalAlpha = 1;
-        });
-        C.stamp(ctx, w / 2, Math.min(h - 22, 104 + sc.msgs.length * GAP), sc.stamp[0], sc.stamp[1], (run - sc.msgs.length * STEP - 0.2) / 0.4);
-        say(`${sc.pill}. ${sc.note}`);
-      },
-    });
-  });
 
   // FastAPI: where request A runs for async def + await, def (thread pool) and async def with a blocking call.
   document.querySelectorAll('[data-figure="python-concurrency-fastapi"]').forEach((root) => {

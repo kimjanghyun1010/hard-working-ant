@@ -46,54 +46,6 @@
   };
   const notesOf = (list) => list.map((s) => s.note);
 
-  // Address space: the fixed prefix bits of /16 and /24, then which subnet 10.1.2.4 lands in.
-  fig('cidr', () => {
-    const SEC = 5.6, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3);
-    // Data: Azure reserves 5 addresses in every subnet, so /24 leaves 251 and /27 leaves 27.
-    const SUB = [['web', '10.1.1.0/24', '251개'], ['app', '10.1.2.0/24', '251개'], ['GatewaySubnet', '10.1.255.0/27', '27개']];
-    const SC = [
-      { pill: 'VNet 10.1.0.0/16', oct: ['10', '1', '0~255', '0~255'], line: '앞 16비트 고정, 뒤 16비트로 65,536개', note: 'VNet 주소 공간 /16은 앞 16비트를 고정하고 나머지 16비트로 주소 65,536개를 만든다.' },
-      { pill: '서브넷 /24', oct: ['10', '1', '2', '0~255'], line: '앞 24비트 고정, 뒤 8비트로 256개', note: '서브넷은 그 안을 더 잘게 자른다. /24는 256개이고 Azure가 5개를 예약해 251개를 쓴다.' },
-      { pill: 'IP 10.1.2.4', oct: ['10', '1', '2', '4'], line: '앞 24비트가 10.1.2와 같다', note: '10.1.2.4는 앞 24비트가 app 서브넷과 같아서 그 서브넷에 속한다.' },
-    ];
-    return {
-      height: 266, still: 2 * (SEC + HOLD) + SEC, scenes: S, notes: notesOf(SC),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 3), sc = SC[i];
-        C.pill(ctx, 0, 0, sc.pill, 'info');
-        C.text(ctx, '칸 하나 = 1비트', w, 11, { size: 10, align: 'right', base: 'middle' });
-        const g = 6, cw = (w - 3 * g) / 32, y0 = 36, ch = 16;
-        const fixed = i === 0 ? 16 * ease(t, 0.2, 1.6) : i === 1 ? 16 + 8 * ease(t, 0.2, 1.4) : 24, match = i === 2 ? 24 * ease(t, 0.8, 2.4) : 0;
-        for (let b = 0; b < 32; b++) {
-          ctx.fillStyle = b < match ? GREEN[2] : b < Math.min(16, fixed) ? U.blue : b < fixed ? U.purple : U.cell;
-          ctx.beginPath(); ctx.roundRect(b * cw + Math.floor(b / 8) * g + 0.5, y0, cw - 1.5, ch, 2); ctx.fill();
-        }
-        sc.oct.forEach((o, j) => C.text(ctx, o, (j * 8 + 4) * cw + j * g, y0 + ch + 15, { size: 11, weight: 600, color: U.text, align: 'center' }));
-        C.text(ctx, sc.line, 0, y0 + ch + 38, { size: 11, weight: 600, color: i === 2 ? GREEN[1] : U.text });
-        const gy = 106;
-        C.group(ctx, 0, gy, w, h - gy - 2, 'VNet 10.1.0.0/16', gy + 16);
-        if (i === 0) C.text(ctx, '아직 나누지 않은 주소 공간', w / 2, gy + 88, { size: 10, align: 'center', base: 'middle' });
-        SUB.forEach(([name, cidr, n], j) => {
-          const ry = gy + 28 + j * 42, a = i === 0 ? 0 : i === 1 ? ease(t, 1.4 + j * 0.9, 2.0 + j * 0.9) : 1;
-          if (a <= 0) { if (i) C.box(ctx, 10, ry, w - 20, 34, { fill: U.plot, dash: [3, 3], r: 6 }); return; }
-          ctx.globalAlpha = a;
-          C.box(ctx, 10, ry, w - 20, 34, { fill: '#fff', on: i === 2 && j === 1 && t > 3.6, r: 6 });
-          C.text(ctx, name, 20, ry + 17.5, { size: 11, weight: 600, color: U.text, base: 'middle' });
-          C.text(ctx, cidr, 30 + tw(ctx, name, 11, 600), ry + 17.5, { size: 10, base: 'middle' });
-          C.text(ctx, `${n} 사용`, w - 20, ry + 17.5, { size: 10, align: 'right', base: 'middle' });
-          ctx.globalAlpha = 1;
-        });
-        if (i === 2 && t > 2.4) {
-          const ry = gy + 28 + 42 + 17, [x, y] = at([[w - 50, y0 + ch + 34], [w - 50, ry - 34], [w - 104, ry]], ease(t, 2.4, 3.6));
-          const s = '10.1.2.4', cw2 = tw(ctx, s, 10, 700) + 14;
-          ctx.beginPath(); ctx.roundRect(x - cw2 / 2, y - 9, cw2, 18, 9); ctx.fillStyle = GREEN[2]; ctx.fill();
-          C.text(ctx, s, x, y + 0.5, { size: 10, weight: 700, color: '#fff', align: 'center', base: 'middle' });
-        }
-        say(sc.note);
-      },
-    };
-  });
-
   // One VM's route table: same VNet, an unconnected private range, the internet.
   fig('route', (root) => {
     const narrow = root.clientWidth < 560, SEC = 5.6, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3);
@@ -133,53 +85,17 @@
     };
   });
 
-  // Longest prefix match: every row covers 10.1.2.5; the row with the most matching bits wins.
-  fig('lpm', (root) => {
-    const narrow = root.clientWidth < 560, SEC = 6.2, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const ROWS = [['0.0.0.0/0', '인터넷', 0, [0, 0, 0, 0]], ['10.0.0.0/8', '없음', 8, [10, 0, 0, 0]], ['10.1.0.0/16', '가상 네트워크', 16, [10, 1, 0, 0]], ['10.1.2.0/24', '방화벽 10.1.9.4', 24, [10, 1, 2, 0]]];
-    const bits = (ip) => ip.flatMap((o) => Array.from({ length: 8 }, (_, b) => (o >> (7 - b)) & 1));
-    const SC = [
-      { dst: [10, 1, 2, 5], win: 3, note: '네 줄 모두 10.1.2.5를 포함하지만, 가장 길게 일치하는 /24를 고른다.' },
-      { dst: [10, 1, 3, 5], win: 2, note: '10.1.3.5는 /24의 24번째 비트에서 어긋나서 /16을 고른다.' },
-    ];
-    SC.forEach((sc) => { const d = bits(sc.dst); sc.m = ROWS.map((r) => { const p = bits(r[3]); let m = 0; while (m < r[2] && p[m] === d[m]) m++; return m; }); });
-    return {
-      height: 282, still: SEC + HOLD + SEC, scenes: S, notes: notesOf(SC),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), sc = SC[i], dst = sc.dst.join('.');
-        C.pill(ctx, 0, 0, `목적지 ${dst}`, 'info');
-        ctx.font = U.font(10);
-        C.legend(ctx, w - tw(ctx, '일치어긋남', 10) - 36, 11, [['일치', GREEN[2]], ['어긋남', RED[2]]]);
-        const lw = narrow ? 108 : 150, cw = (w - lw - 8 - 9) / 32, win = t > 4.4;
-        ROWS.forEach((r, j) => {
-          const y = 36 + j * 54, p = ease(t, 0.4 + j * 0.9, 1.2 + j * 0.9), m = sc.m[j], n = Math.floor(p * r[2] + 1e-6);
-          if (win && j === sc.win) C.box(ctx, 0, y, w, 38, { on: true, r: 6 });
-          C.text(ctx, r[0], 8, y + 15, { size: 11, weight: 700, color: U.text, base: 'middle' });
-          C.text(ctx, r[1], 8, y + 29, { size: 10, base: 'middle' });
-          for (let b = 0; b < 32; b++) {
-            const x = lw + b * cw + Math.floor(b / 8) * 3;
-            ctx.fillStyle = b < Math.min(n, m) ? GREEN[2] : b === m && b < n ? RED[2] : b < r[2] ? '#e2e8f0' : U.plot;
-            ctx.beginPath(); ctx.roundRect(x + 0.5, y + 10, cw - 1.2, 20, 2); ctx.fill();
-          }
-          if (p >= 1) C.text(ctx, m === r[2] ? `/${r[2]} 일치` : `${m + 1}번째 비트에서 어긋남`, w - 4, y + 46, { size: 9, weight: 600, color: m === r[2] ? GREEN[1] : RED[1], align: 'right', base: 'middle' });
-        });
-        C.stamp(ctx, w / 2, h - 18, `${ROWS[sc.win][0]} 선택, 다음 홉 ${ROWS[sc.win][1]}`, 'info', (t - 4.4) / 0.4);
-        say(`목적지 ${dst}. ${sc.note}`);
-      },
-    };
-  });
-
   // VNet peering between A and B: dropped before, two links, then traffic over the backbone.
   fig('peering', (root) => {
-    const narrow = root.clientWidth < 560, SEC = 5.6, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3);
+    const narrow = root.clientWidth < 560, VN = narrow ? 'VNetLocal' : '가상 네트워크', SEC = 5.6, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3);
     const SC = [
       { pill: '피어링 전', tone: 'warn', note: '피어링 전에는 B 대역이 A의 없음 경로에 걸려 버려진다.' },
       { pill: '링크 두 개 만들기', tone: 'info', note: '양쪽에 링크를 하나씩 만들어 둘 다 Connected가 되면 서로의 대역이 경로에 추가된다.' },
       { pill: '피어링 후', tone: 'ok', note: '패킷은 게이트웨이 없이 Microsoft 백본으로 바로 오간다.' },
     ];
     const NET = [
-      { name: 'VNet A', cidr: '10.1.0.0/16', ip: '10.1.1.4', rows: [['10.1.0.0/16', '가상 네트워크'], ['10.0.0.0/8', '없음'], ['10.2.0.0/16', 'VNet 피어링']] },
-      { name: 'VNet B', cidr: '10.2.0.0/16', ip: '10.2.1.4', rows: [['10.2.0.0/16', '가상 네트워크'], ['10.0.0.0/8', '없음'], ['10.1.0.0/16', 'VNet 피어링']] },
+      { name: 'VNet A', cidr: '10.1.0.0/16', ip: '10.1.1.4', rows: [['10.1.0.0/16', VN], ['10.0.0.0/8', '없음'], ['10.2.0.0/16', 'VNet 피어링']] },
+      { name: 'VNet B', cidr: '10.2.0.0/16', ip: '10.2.1.4', rows: [['10.2.0.0/16', VN], ['10.0.0.0/8', '없음'], ['10.1.0.0/16', 'VNet 피어링']] },
     ];
     return {
       height: 240, still: 2 * (SEC + HOLD) + SEC, scenes: S, notes: notesOf(SC),
@@ -282,7 +198,7 @@
         if (i === 1 && k > 0 && k < 1) dot(ctx, at(path, k));
         const by = 186, cw = (w - 12) / 2;
         C.text(ctx, '피어링 설정', 0, by + 9, { size: 10, weight: 600, color: U.text, base: 'middle' });
-        [['허브', '게이트웨이 전송 허용'], ['스포크', '원격 게이트웨이 사용']].forEach(([who, s], j) => {
+        (narrow ? [['허브', 'GW 전송 허용'], ['스포크', '원격 GW 사용']] : [['허브', '게이트웨이 전송 허용'], ['스포크', '원격 게이트웨이 사용']]).forEach(([who, s], j) => {
           const y = by + 20 + j * 24, on = i === 1 && t > 0.6 + j * 0.6;
           C.box(ctx, 0, y, cw, 20, { fill: '#fff', on, r: 4 });
           ctx.beginPath(); ctx.roundRect(7, y + 5, 10, 10, 2); ctx.fillStyle = on ? U.accent : '#fff'; ctx.fill(); ctx.strokeStyle = on ? U.accent : '#cbd5e1'; ctx.stroke();
@@ -294,44 +210,6 @@
           (r) => (r === 1 && i === 1 && k > 0 && k < 1 ? 'on' : r && add(r - 1) > 0 && add(r - 1) < 1 ? 'ok' : ''), (r) => (r ? add(r - 1) : 1));
         C.stamp(ctx, w / 2, h - 18, sc.stamp[0], sc.stamp[1], (t - (i ? 5.0 : 2.8)) / 0.4);
         say(`${sc.pill}. ${sc.note}`);
-      },
-    };
-  });
-
-  // Links to manage as VNets grow: every pair peered against one hub.
-  fig('scale', () => {
-    const SEC = 5.2, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2), N0 = 2, N1 = 30, MAX = 450;
-    const LINES = [['풀 메시', U.red, (n) => (n * (n - 1)) / 2], ['허브-스포크', U.blue, (n) => n - 1]];
-    const SC = [
-      { pill: '모두 서로 피어링', note: '모든 VNet을 서로 이으면 피어링이 n(n-1)/2개로 늘어 30개면 435개다.' },
-      { pill: '허브 하나에만 피어링', note: '허브 하나에만 이으면 n-1개라 30개여도 29개다. 대신 스포크끼리는 허브를 거친다.' },
-    ];
-    return {
-      height: 250, still: SEC + HOLD + SEC, scenes: S, notes: notesOf(SC),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2);
-        C.pill(ctx, 0, 0, SC[i].pill, i ? 'ok' : 'warn');
-        ctx.font = U.font(10);
-        C.legend(ctx, w - LINES.reduce((a, [s]) => a + 24 + ctx.measureText(s).width, 0) + 12, 11, LINES.map(([s, c]) => [s, c]));
-        const x0 = 34, x1 = w - 10, y0 = 40, H = 170, X = (n) => x0 + ((n - N0) / (N1 - N0)) * (x1 - x0);
-        const Y = C.panel(ctx, x0, y0, x1 - x0, H, { max: MAX, ticks: [[0, '0'], [150, '150'], [300, '300'], [450, '450']] });
-        [2, 10, 20, 30].forEach((n) => C.text(ctx, String(n), X(n), y0 + H + 14, { size: 10, align: n === 2 ? 'left' : n === 30 ? 'right' : 'center' }));
-        C.text(ctx, 'VNet 수', x1, y0 + H + 30, { size: 10, align: 'right' });
-        C.text(ctx, '피어링 수', x0, y0 + H + 30, { size: 10 });
-        LINES.forEach(([, color, f], j) => {
-          const k = j < i ? 1 : j === i ? ease(t, 0.3, 4.2) : 0;
-          if (k <= 0) return;
-          const nEnd = N0 + (N1 - N0) * k, pts = [];
-          for (let n = N0; n <= nEnd + 1e-6; n += 0.5) pts.push([X(n), Y(f(n))]);
-          pts.push([X(nEnd), Y(f(nEnd))]);
-          C.line(ctx, pts, color, 2);
-          const [px, py] = pts[pts.length - 1];
-          C.dot(ctx, px, py, color);
-          const s = `${Math.round(f(nEnd))}개`, right = px + 8 + tw(ctx, s, 11, 600) < x1;
-          C.text(ctx, s, right ? px + 8 : px - 8, py - (j ? 10 : 0) + (right ? 0 : -8), { weight: 600, color, align: right ? 'left' : 'right', base: 'middle' });
-        });
-        if (i === 1) C.stamp(ctx, (x0 + x1) / 2, y0 + H * 0.45, 'VNet 30개: 435 대 29', 'info', (t - 4.4) / 0.4);
-        say(`${SC[i].pill}. ${SC[i].note}`);
       },
     };
   });
@@ -444,108 +322,6 @@
     };
   });
 
-  // Inside the FortiGate: route lookup, then policy; with the tunnel down only a blackhole route keeps traffic in.
-  fig('policy', (root) => {
-    const narrow = root.clientWidth < 560, SEC = 5.6, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3);
-    // Data: blackhole distance 254 follows Fortinet's IPsec wizard default; 255 routes are never installed.
-    const R = [['10.1.0.0/16', 'to_azure, 거리 10'], ['10.1.0.0/16', 'blackhole, 거리 254'], ['0.0.0.0/0', 'wan1, 거리 10']];
-    const P = [['1', 'lan → to_azure', '허용'], ['2', 'lan → wan1', '허용 (인터넷용)']];
-    const SC = [
-      { pill: '터널 정상', tone: 'info', rs: ['on', '', ''], ps: ['ok', ''], out: 0, stamp: ['터널로 나감', 'ok'], note: '터널이 살아 있으면 거리 10인 터널 경로가 쓰이고, 1번 정책을 지나 터널로 나간다.' },
-      { pill: '터널 끊김, 블랙홀 없음', tone: 'bad', rs: ['dead', 'gone', 'bad'], ps: ['', 'bad'], out: 1, stamp: ['암호화 없이 인터넷으로', 'bad'], note: '터널이 끊기면 터널 경로가 빠지고, 사설 트래픽이 기본 경로를 따라 wan1로 암호화 없이 나간다.' },
-      { pill: '터널 끊김, 블랙홀 있음', tone: 'ok', rs: ['dead', 'on', ''], ps: ['', ''], out: -1, stamp: ['버림, 새지 않음', 'ok'], note: '거리 254 블랙홀 경로를 두면 터널이 끊긴 동안 패킷을 버려 밖으로 새지 않는다.' },
-    ];
-    R[1].gone = '블랙홀 경로 없음';
-    return {
-      height: 314, still: 2 * (SEC + HOLD) + SEC, scenes: S, notes: notesOf(SC),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 3), sc = SC[i];
-        C.pill(ctx, 0, 0, sc.pill, sc.tone);
-        const pcw = narrow ? 58 : 90, exW = narrow ? 86 : 130, fx = pcw + 16, fw = w - fx - exW - 16, cy = 74, mid = fx + fw / 2, ex = w - exW;
-        const down = i > 0;
-        C.card(ctx, { x: 0, y: cy - 30, w: pcw, h: 60, t: 'PC', s: '10.0.1.10' });
-        C.box(ctx, fx, 36, fw, 76, { fill: U.plot, r: 8 });
-        C.text(ctx, 'FortiGate', fx + 10, 50, { size: 11, weight: 600, color: U.text });
-        C.text(ctx, 'lan', fx + 6, cy + 14, { size: 9 });
-        C.text(ctx, 'to_azure', fx + fw - 6, 49 + 14, { size: 9, align: 'right' });
-        C.text(ctx, 'wan1', fx + fw - 6, 91 + 16, { size: 9, align: 'right' });
-        C.card(ctx, { x: ex, y: 36, w: exW, h: 34, t: 'Azure 터널', s: down ? '끊김' : '', size: 11 }, down ? { dim: true, dash: [4, 3], fill: U.plot } : { lit: sc.out === 0 && t > 4.2 });
-        C.card(ctx, { x: ex, y: 78, w: exW, h: 34, t: '인터넷', size: 11 }, sc.out === 1 && t > 4.2 ? { stroke: RED[2], fill: RED[0] } : {});
-        const IN = [[pcw, cy], [mid, cy]], OUT = [[[mid, cy], [mid, 53], [ex, 53]], [[mid, cy], [mid, 95], [ex, 95]]];
-        rail(ctx, IN);
-        OUT.forEach((p, j) => rail(ctx, p, j === 0 && down ? '#e2e8f0' : '#cbd5e1', j === 0 && down ? [3, 3] : null));
-        const kin = ease(t, 0.5, 1.5), kout = ease(t, 3.0, 4.2);
-        if (kin > 0 && kin < 1) dot(ctx, at(IN, kin));
-        else if (kin >= 1 && (sc.out < 0 || kout <= 0)) { if (sc.out < 0 && t > 2.2) cross(ctx, mid, cy, ease(t, 2.2, 2.4)); else dot(ctx, [mid, cy]); }
-        if (sc.out >= 0 && kout > 0 && kout < 1) dot(ctx, at(OUT[sc.out], kout), sc.out ? U.red : U.blue);
-        const tY = 128;
-        table(ctx, 0, tY, w, '라우팅 테이블 (같은 목적지는 거리가 작은 쪽)', R, (j) => (sc.rs[j] === 'dead' || sc.rs[j] === 'gone' ? sc.rs[j] : t > 1.7 ? sc.rs[j] : ''));
-        table(ctx, 0, tY + 90, w, '방화벽 정책 (위에서부터)', P, (j) => (t > 2.4 ? sc.ps[j] : ''));
-        C.stamp(ctx, w / 2, h - 18, sc.stamp[0], sc.stamp[1], (t - 4.4) / 0.4);
-        say(`${sc.pill}. ${sc.note}`);
-      },
-    };
-  });
-
-  // Demo: one tunnel loses traffic while the standby instance takes over; two tunnels keep it flowing.
-  fig('redundancy', (root) => {
-    const narrow = root.clientWidth < 560, T = 1.2, BACK = 4.2, E = 0.3, TR = 1.1, LAST = 5.7, END = 7.0;
-    const MODES = [
-      { pill: '터널 1개, active-standby', short: '터널 1개', note: '터널이 하나면 인스턴스가 바뀌어 터널이 다시 맺힐 때까지 패킷을 잃는다. 시간과 개수는 대략값이다.' },
-      { pill: '터널 2개, active-active', short: '터널 2개', note: '인스턴스마다 터널이 있으면 하나가 빠져도 남은 터널로 바로 넘어간다. 시간과 개수는 대략값이다.' },
-    ];
-    // Packet n leaves at n * E; returns its tunnel (0 or 1) and the time it is lost, if it is.
-    const fate = (mode, n) => {
-      const e = n * E, tun = mode ? n % 2 : e < T ? 0 : 1;
-      if (tun === 0 && e < T && e + TR > T) return { tun, lost: T };
-      if (!mode && e >= T && e < BACK) return { tun: -1, lost: e };
-      if (mode && tun === 0 && e >= T) return { tun: 1 };
-      return { tun };
-    };
-    return {
-      height: 236, notes: notesOf(MODES), demo: { modes: MODES.map((m) => m.short), run: '인스턴스 점검 시작' },
-      frame: (ctx, w, h, time, say, ui) => {
-        const mode = ui.mode, run = ui.runAt === null ? -1 : time - ui.runAt, off = run >= T;
-        C.pill(ctx, 0, 0, MODES[mode].pill, run < 0 ? 'info' : mode ? 'ok' : 'bad');
-        const fgw = narrow ? 76 : 110, gx = Math.round(w * (narrow ? 0.5 : 0.55)), iw = w - gx - 20, cy = 114;
-        const inst = [{ x: gx + 10, y: 56, w: iw, h: 48 }, { x: gx + 10, y: 130, w: iw, h: 48 }];
-        const P = inst.map((b) => [[fgw, cy], [fgw + 24, cy], [gx - 12, b.y + 24], [b.x, b.y + 24]]);
-        C.group(ctx, gx, 32, w - gx, 156, narrow ? 'Azure GW' : 'Azure VPN 게이트웨이', 48);
-        const re = mode ? 1 : ease(run, BACK - 0.6, BACK);
-        [0, 1].forEach((j) => {
-          const up = j === 0 ? !off : mode || re > 0;
-          if (j === 0 && off) rail(ctx, P[0], '#e2e8f0', [3, 3]);
-          else if (up) tunnel(ctx, P[j], j === 1 ? re : 1, U.accentLine);
-        });
-        if (!mode && re > 0 && re < 1) C.text(ctx, '재연결', (fgw + gx) / 2, inst[1].y + 34, { size: 10, weight: 600, color: ORANGE[1], align: 'center' });
-        C.card(ctx, { x: 0, y: cy - 28, w: fgw, h: 56, t: 'FortiGate', s: '사무실', size: 11 });
-        const s0 = off ? '점검 중' : 'active', s1 = mode ? 'active' : run >= BACK ? 'active' : 'standby';
-        C.card(ctx, { ...inst[0], t: '인스턴스 0', s: s0 }, off ? { dim: true, dash: [4, 3], fill: U.plot } : {});
-        C.card(ctx, { ...inst[1], t: '인스턴스 1', s: s1 }, s1 === 'standby' ? { dim: true, fill: U.plot } : {});
-        let lost = 0;
-        if (run >= 0) for (let n = 0; n * E <= Math.min(run, LAST); n++) {
-          const f = fate(mode, n), e = n * E;
-          if (f.lost !== undefined && run >= f.lost) {
-            lost++;
-            const a = 1 - (run - f.lost) / 0.8;
-            if (a <= 0) continue;
-            const p = f.tun < 0 ? [fgw + 10, cy] : at(P[f.tun], (f.lost - e) / TR);
-            ctx.globalAlpha = a; dot(ctx, p, U.red); ctx.globalAlpha = 1;
-            if (f.tun < 0) cross(ctx, fgw + 10, cy - 14, a, 4);
-            continue;
-          }
-          const k = (run - e) / TR;
-          if (k < 1) dot(ctx, at(P[f.tun], k));
-        }
-        const ls = `잃은 패킷 ${lost}`;
-        C.text(ctx, ls, w, 11, { size: 11, weight: 700, color: lost ? U.red : U.muted, align: 'right', base: 'middle' });
-        if (run < 0) C.text(ctx, '버튼을 눌러 보자', w / 2, h - 18, { size: 12, align: 'center', base: 'middle' });
-        if (run >= END) C.stamp(ctx, w / 2, h - 20, mode ? '남은 터널로 계속' : '재연결까지 끊김', mode ? 'ok' : 'bad', (run - END) / 0.4);
-        say(`${MODES[mode].pill}. ${MODES[mode].note} ${ls}.`);
-      },
-    };
-  });
-
   // Demo: the same 10.0.0.0/16 on both sides keeps the packet inside the VNet.
   fig('overlap', (root) => {
     const narrow = root.clientWidth < 560, END = 3.6;
@@ -627,50 +403,4 @@
     };
   });
 
-  // Filters on the way in: FortiGate policy top-down, then subnet NSG and NIC NSG by priority, first match wins.
-  fig('filters', (root) => {
-    const SEC = 7.4, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 2);
-    const NODES = [{ t: 'PC', s: '사무실' }, { t: '정책', s: 'FortiGate' }, { t: '터널' }, { t: 'NSG', s: '서브넷' }, { t: 'NSG', s: 'NIC' }, { t: 'VM', s: '10.1.1.4' }];
-    const FG = { name: 'FortiGate 정책 (위에서부터)', rows: [['1', 'lan → to_azure', '허용'], ['2', 'lan → wan1', '허용']], hit: 0 };
-    const NIC = { name: 'NIC NSG', rows: [], hit: -1 };
-    const SC = [
-      { pill: '허용 규칙이 먼저', tone: 'ok', stamp: ['VM 도착', 'ok'], note: 'FortiGate 정책은 위에서부터, NSG는 우선순위 숫자가 작은 것부터 보고 처음 일치한 규칙에서 멈춘다. 들어올 때는 서브넷 NSG, NIC NSG 순이다.',
-        gates: { 1: FG, 3: { name: '서브넷 NSG (숫자가 작은 것부터)', rows: [['100', '10.0.0.0/16 → 443', '허용'], ['65000', 'AllowVnetInBound', '허용'], ['65500', 'DenyAllInBound', '거부']], hit: 0 }, 4: NIC } },
-      { pill: '거부 규칙이 먼저', tone: 'bad', stamp: ['서브넷 NSG 100에서 거부', 'bad'], note: '우선순위 100의 거부가 200의 허용보다 먼저 일치해서 허용 규칙까지 가지 못한다.',
-        gates: { 1: FG, 3: { name: '서브넷 NSG (숫자가 작은 것부터)', rows: [['100', '모든 출발지 → 모든 포트', '거부'], ['200', '10.0.0.0/16 → 443', '허용'], ['65500', 'DenyAllInBound', '거부']], hit: 0, deny: true } } },
-    ];
-    // Schedule per scene: move between nodes, pause at each gate long enough to scan rows up to the match.
-    SC.forEach((sc) => {
-      const plan = [];
-      let t = 0.4;
-      for (let j = 0; j < NODES.length - 1; j++) {
-        plan.push({ kind: 'move', a: j, b: j + 1, t0: t, t1: t + 0.6 }); t += 0.6;
-        const g = sc.gates[j + 1];
-        if (g) { const d = g.rows.length ? (g.hit + 1) * 0.55 + 0.4 : 0.7; plan.push({ kind: 'gate', at: j + 1, g, t0: t, t1: t + d }); t += d; if (g.deny) break; }
-      }
-      sc.plan = plan; sc.end = t;
-    });
-    return {
-      height: 262, still: SEC + HOLD + SEC, scenes: S, notes: notesOf(SC),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), sc = SC[i];
-        C.pill(ctx, 0, 0, sc.pill, sc.tone);
-        const g = 6, nw = (w - 5 * g) / 6, nx = (j) => j * (nw + g), cy = 63;
-        C.line(ctx, [[nw / 2, cy], [nx(5) + nw / 2, cy]], '#cbd5e1', 1.2);
-        const step = sc.plan.filter((p) => t >= p.t0).pop(), gate = t >= sc.end ? sc.plan.find((p) => p.at === 3) : sc.plan.filter((p) => p.kind === 'gate' && t >= p.t0).pop() || sc.plan.find((p) => p.kind === 'gate');
-        const denied = sc.gates[3].deny && t >= sc.end;
-        NODES.forEach((n, j) => C.card(ctx, { x: nx(j), y: 40, w: nw, h: 46, t: n.t, s: n.s, size: 11 }, { lit: (step && step.kind === 'gate' && step.at === j && t < step.t1) || (j === 5 && t >= sc.end && !denied), stroke: denied && j === 3 ? RED[2] : U.grid, fill: j === 2 ? U.plot : '#fff' }));
-        const gone = t >= sc.end + (sc.gates[3].deny ? 0.2 : 0);
-        if (!step) dot(ctx, [nw / 2, cy]);
-        else if (step.kind === 'move' && t < step.t1) dot(ctx, [nx(step.a) + nw / 2 + (nx(step.b) - nx(step.a)) * ease(t, step.t0, step.t1), cy]);
-        else if (!gone) dot(ctx, [nx(step.kind === 'gate' ? step.at : step.b) + nw / 2, cy]);
-        if (denied) cross(ctx, nx(3) + nw / 2, cy - 30, ease(t, sc.end, sc.end + 0.2), 5);
-        const G = gate.g, scan = Math.floor((t - gate.t0) / 0.55);
-        if (G.rows.length) table(ctx, 0, 104, w, G.name, G.rows, (j) => (j < Math.min(scan, G.hit) ? 'skip' : j === G.hit && scan > j ? (G.deny ? 'bad' : 'ok') : j === scan ? 'on' : ''));
-        else { C.text(ctx, G.name, 0, 113, { size: 10, weight: 600, color: U.text, base: 'middle' }); C.box(ctx, 0, 124, w, 18, { fill: U.plot, dash: [3, 3], r: 4 }); C.text(ctx, '연결된 NSG 없음, 그대로 통과', w / 2, 133.5, { size: 10, align: 'center', base: 'middle' }); }
-        C.stamp(ctx, w / 2, h - 22, sc.stamp[0], sc.stamp[1], (t - sc.end - 0.3) / 0.4);
-        say(`${sc.pill}. ${sc.note}`);
-      },
-    };
-  });
 })();

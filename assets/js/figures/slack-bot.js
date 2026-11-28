@@ -1,4 +1,4 @@
-// Slack bot post: delivery paths, the 3 second ack, retries and dedup, signatures, tokens, legacy timeline.
+// Slack bot post: delivery paths, signatures, the 3 second ack, retries and dedup, tokens.
 (() => {
   const U = hwa.ui, C = hwa.cv;
   const ease = (t, a, b) => hwa.smooth((t - a) / (b - a));
@@ -71,36 +71,6 @@
         say(`${sc.pill}. ${sc.note}`);
       },
     });
-  });
-
-  // Overview: an alert goes out through the Web API; a command comes in as an event and is answered the same way.
-  flow('slack-bot-overview', {
-    height: 252,
-    layout: (w) => {
-      const nar = w < 480, uw = nar ? 58 : 110, g = nar ? 14 : 40, sw = nar ? 140 : 230, sx = uw + g, bx = sx + sw + g, bw = w - bx;
-      const cw = nar ? 50 : 84, ax = sx + 8 + cw + 8, aw = sx + sw - 8 - ax, sz = aw < 80 ? 10 : 12;
-      return {
-        groups: [[0, 34, uw, 182, '사용자'], [sx, 34, sw, 182, '슬랙'], [bx, 34, bw, 182, '봇 서버']],
-        b: {
-          user: { x: 6, y: 105, w: uw - 12, h: 50, t: '슬랙 앱', size: nar ? 10 : 12 },
-          chan: { x: sx + 8, y: 60, w: cw, h: 146, t: '#ops', s: '채널' },
-          ev: { x: ax, y: 60, w: aw, h: 58, t: 'Events API', size: sz },
-          web: { x: ax, y: 148, w: aw, h: 58, t: 'Web API', size: sz },
-          bot: { x: bx + 8, y: 60, w: bw - 16, h: 146, t: 'Bolt 앱', s: '리스너' },
-        },
-      };
-    },
-    scenes: [
-      { pill: '알림 보내기', tone: 'warn', note: '알림은 봇 서버가 Web API를 불러 채널에 쓴다. 호출 한 번으로 끝난다.', steps: [
-        ['bot', 'web', 'chat.postMessage', 'warn', '봇이 Web API를 부른다'], ['web', 'chan', '배포 실패', 'warn', '슬랙이 채널에 글을 올린다'],
-        ['chan', 'user', '배포 실패', 'warn', '운영자 화면에 알림이 뜬다'],
-      ] },
-      { pill: '명령 받기', tone: 'info', note: '명령은 슬랙이 봇 서버로 이벤트를 보내고, 봇은 다시 Web API로 답한다.', steps: [
-        ['user', 'chan', '@봇 status', 'blue', '운영자가 채널에서 봇을 부른다', -8], ['chan', 'ev', 'app_mention', 'blue', '슬랙이 이벤트를 만든다'],
-        ['ev', 'bot', 'POST', 'blue', '봇 서버로 이벤트가 온다'], ['bot', 'web', 'chat.postMessage', 'ok', '봇이 Web API로 답을 쓴다'],
-        ['web', 'chan', 'api 정상', 'ok', '채널에 답이 올라온다'], ['chan', 'user', 'api 정상', 'ok', '운영자가 답을 본다', 8],
-      ] },
-    ],
   });
 
   // Events API: Slack posts to a public HTTPS address; the URL check echoes challenge, events get a 200.
@@ -391,43 +361,5 @@
         ['bot', 'api', 'conversations.history', 'blue', '채널 기록을 읽으려 한다', -7], ['api', 'bot', 'missing_scope', 'bad', 'channels:history 권한이 없다', 7],
       ] },
     ],
-  });
-
-  // Legacy timeline. Data: docs.slack.dev changelog 2024-04 and 2024-09 posts (classic app shutdown paused).
-  document.querySelectorAll('[data-figure="slack-bot-legacy"]').forEach((root) => {
-    const EV = [
-      [2024 + 155 / 366, '2024.6.4', '클래식 앱, 레거시 봇', '신규 생성 중단', 'warn', -1],
-      [2025 + 89 / 365, '2025.3.31', '레거시 커스텀 봇', '동작 중단 공지', 'bad', 1],
-      [2026 + 319 / 365, '2026.11.16', '클래식 앱 종료 예정일', '보류됨', 'info', -1],
-    ];
-    const NOW = 2026 + 315 / 365, Y0 = 2024, Y1 = 2027, AX = 112;
-    hwa.scene(root, {
-      height: 206, still: 3 * 1.3 + 1,
-      frame: (ctx, w, h, time, say) => {
-        const s = hwa.steps(time, 3, 1.3, 2.6), x0 = 8, x1 = w - 8, X = (v) => x0 + (v - Y0) / (Y1 - Y0) * (x1 - x0);
-        C.pill(ctx, 0, 0, '레거시 정리 일정', 'info');
-        C.line(ctx, [[x0, AX], [x1, AX]], U.text, 1.2);
-        for (let y = Y0; y <= Y1; y++) {
-          C.line(ctx, [[X(y), AX - 3], [X(y), AX + 3]], U.muted, 1);
-          C.text(ctx, `${y}`, X(y), AX + 15, { size: 9, align: y === Y0 ? 'left' : y === Y1 ? 'right' : 'center' });
-        }
-        C.dashed(ctx, X(NOW), AX - 14, X(NOW), AX + 22, U.now);
-        C.text(ctx, '글 쓴 시점', X(NOW) - 4, AX + 32, { size: 9, align: 'right' });
-        EV.forEach(([v, date, name, state, tone, side], j) => {
-          const k = s.k(j);
-          if (k <= 0) return;
-          const bwid = Math.max(tw(ctx, name, 11, 600), tw(ctx, state, 11, 600) + 18) + 4, bx = clamp(X(v), bwid / 2, w - bwid / 2);
-          const yd = side < 0 ? 46 : 196, yn = side < 0 ? 62 : 180, yc = side < 0 ? 84 : 158;
-          ctx.globalAlpha = k;
-          C.line(ctx, [[X(v), AX], [X(v), side < 0 ? yc + 10 : yc - 10]], '#cbd5e1', 1);
-          C.dot(ctx, X(v), AX, U.tones[tone][1]);
-          C.text(ctx, date, bx, yd, { size: 10, align: 'center' });
-          C.text(ctx, name, bx, yn, { size: 11, weight: 600, color: U.text, align: 'center' });
-          C.chip(ctx, j === 2 && !s.done ? '종료 예정' : state, bx + (tw(ctx, j === 2 && !s.done ? '종료 예정' : state, 11, 600) + 18) / 2, yc, j === 2 && !s.done ? 'warn' : tone);
-          ctx.globalAlpha = 1;
-        });
-        say('2024년 6월 4일 클래식 앱과 레거시 봇 신규 생성 중단, 2025년 3월 31일 레거시 커스텀 봇 중단 공지, 2026년 11월 16일 클래식 앱 종료 예정이었으나 보류.');
-      },
-    });
   });
 })();

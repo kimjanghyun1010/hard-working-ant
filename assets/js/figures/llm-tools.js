@@ -47,42 +47,6 @@
     ctx.globalAlpha = 1;
   };
 
-  // Tokens: a sentence is cut into tokens, and the model answers one token at a time.
-  each('token', (root) => {
-    const IN = ['서버', '응답', '이', '느', '린', '이유', '를', '알려', '줘'], OUT = ['DB', '응답', '대기', '가', '길', '어서', '입니다'];
-    const SEC = 8, HOLD = 2.2, OY = 196;
-    const place = (ctx, words, w, y0) => {
-      let x = 0, y = y0;
-      return words.map((s) => {
-        const cw = tw(ctx, s, 10, 600) + 14;
-        if (x + cw > w) { x = 0; y += 24; }
-        const p = [x + cw / 2, y];
-        x += cw + 5;
-        return p;
-      });
-    };
-    hwa.scene(root, {
-      height: 226, still: SEC,
-      notes: ['입력 문장은 토큰 9개로 쪼개져 모델에 들어가고, 답은 토큰 하나씩 이어 붙여 만든다.'],
-      frame: (ctx, w, h, time, say) => {
-        const { t } = hwa.loop(time, SEC, HOLD, 1);
-        const nIn = Math.round(clamp((t - 0.8) / 1.8) * IN.length), nOut = t < 3.8 ? 0 : Math.min(OUT.length, Math.floor((t - 3.8) / 0.55) + 1);
-        C.pill(ctx, 0, 0, t < 3.6 ? '입력을 토큰으로' : '토큰 하나씩 생성', t < 3.6 ? 'info' : 'ok');
-        C.text(ctx, `입력 ${nIn}, 출력 ${nOut}토큰`, w, 11, { size: 10, weight: 600, color: U.text, align: 'right', base: 'middle' });
-        C.box(ctx, 0, 32, w, 28, { fill: U.plot, r: 6 });
-        C.text(ctx, '서버 응답이 느린 이유를 알려줘', 10, 46.5, { size: 12, weight: 600, color: U.text, base: 'middle' });
-        if (w > 340) C.text(ctx, '입력 문장', w - 10, 46.5, { size: 10, align: 'right', base: 'middle' });
-        place(ctx, IN, w, 80).forEach(([x, y], i) => tag(ctx, IN[i], x, y, BLUE, clamp(nIn - i)));
-        const my = 112, gen = t >= 2.8 && nOut < OUT.length;
-        C.arrow(ctx, [[w / 2, 92], [w / 2, my - 2]], ease(t, 2.6, 3.0), '#94a3b8', { width: 1.2 });
-        C.card(ctx, { x: w / 2 - 80, y: my, w: 160, h: 44, t: '모델', s: gen ? '다음 토큰 예측' : '대기' }, { lit: gen });
-        C.arrow(ctx, [[w / 2, my + 46], [w / 2, OY - 14]], ease(t, 3.4, 3.8), '#94a3b8', { width: 1.2 });
-        place(ctx, OUT, w, OY).forEach(([x, y], i) => tag(ctx, OUT[i], x, y, PURPLE, i < nOut ? clamp((t - 3.8 - i * 0.55) / 0.25) : 0));
-        say(`입력 문장이 토큰 ${nIn}개로 나뉘고, 모델이 출력 토큰 ${nOut}개를 하나씩 만들었다.`);
-      },
-    });
-  });
-
   // Context window: every turn resends the system prompt and the whole history, so input grows each turn.
   each('context', (root) => {
     const SYS = 500, Q = 100, A = 500, WIN = 4096, N = 7, MAX = 4900, STEP = 1.1, HOLD = 2.6, RH = 24, TOP = 44;
@@ -255,65 +219,7 @@
       { pill: '입력 20,600토큰', tone: 'warn', span: 4000, lanes: ['앱', '모델'], ticks: sec(4), legend: [['pre', '입력 처리'], ['tok', '출력 토큰']], segs: [[0, 0, 100, 'net', ''], [1, 100, 1300, 'pre', '입력 처리'], ...toks(1, 1300, 40, 60)], arcs: [[0, 100, 1300, 'wait', '첫 토큰 대기']], event: [1300, '첫 토큰'], below: [[1300, 3700, '토큰 40개 생성']], stamp: ['첫 토큰 1.3초', 'warn'], say: '입력이 길면 입력 처리가 길어져 첫 토큰이 늦다. 토큰 40개를 만드는 시간은 같다.' },
     ]);
 
-    // Prompt cache: request 2 reuses the processed prefix; request 3 changed its first line and misses.
-    tl('cache', [
-      { pill: '같은 앞부분 재사용', tone: 'ok', span: 2600, lanes: ['요청 1', '요청 2', '요청 3'], ticks: sec(2), legend: [['pre', '입력 처리'], ['cache', '캐시'], ['tok', '출력']], segs: [[0, 0, 1100, 'pre', '고정 앞부분'], [0, 1100, 1250, 'pre', ''], ...toks(0, 1250, 20, 50), [1, 0, 80, 'cache', ''], [1, 80, 230, 'pre', ''], ...toks(1, 230, 20, 50), [2, 0, 1250, 'pre', '앞부분 바뀜'], ...toks(2, 1250, 20, 50)], stamp: ['요청 2만 빨라짐', 'ok'], say: '요청 2는 요청 1과 앞부분이 같아 처리해 둔 결과를 쓰고 새 질문만 처리한다. 요청 3은 맨 앞이 달라 처음부터 다시 처리한다.' },
-    ], { SEC: 6 });
-
-    // Two tool round trips before the answer: each round is a full model call on a longer input.
-    tl('rounds', [
-      { pill: '도구를 두 번 쓰는 질문', tone: 'warn', span: 4800, lanes: ['모델', '앱', '도구'], ticks: sec(4), legend: [['pre', '입력 처리'], ['call', '호출 요청'], ['tool', '도구']], segs: [
-        [0, 0, 300, 'pre', ''], [0, 300, 500, 'call', ''], [1, 500, 600, 'net', ''], [2, 600, 1400, 'tool', '검색'], [1, 1400, 1500, 'net', ''],
-        [0, 1500, 1950, 'pre', ''], [0, 1950, 2150, 'call', ''], [1, 2150, 2250, 'net', ''], [2, 2250, 2900, 'tool', '조회'], [1, 2900, 3000, 'net', ''],
-        [0, 3000, 3600, 'pre', ''], ...toks(0, 3600, 20, 55)], below: [[0, 1500, '1번째 왕복'], [1500, 3000, '2번째 왕복'], [3000, 4700, '답']], stamp: ['모델 호출 3번', 'warn'], say: '도구를 한 번 쓸 때마다 모델을 다시 부르고, 부를 때마다 입력 처리가 길어진다.' },
-    ]);
   }
-
-  // Demo: the same generation shown at once at the end, or streamed token by token.
-  each('stream', (root) => {
-    const SPAN = 3300, TT = 300, NT = 45, GAP = 60, SEC = 5.6, END = TT + NT * GAP;
-    const LINES = [1, 0.92, 0.97, 0.62, 0.9, 0.45], LT = LINES.reduce((a, b) => a + b, 0);
-    const notes = ['한 번에 받으면 3초 동안 빈 화면을 보다가 답이 통째로 뜬다.', '스트리밍이면 0.3초에 첫 글자가 보이고 나머지가 이어서 찍힌다. 끝나는 시각은 같다.'];
-    hwa.scene(root, {
-      height: 270, still: SEC, notes,
-      demo: { modes: ['한 번에 받기', '스트리밍'], run: '질문 보내기' },
-      frame: (ctx, w, h, time, say, ui) => {
-        const m = ui.mode, run = demoRun(ui, time), t = clamp(run / SEC) * SPAN;
-        const made = t < TT ? 0 : Math.min(NT, Math.floor((t - TT) / GAP) + 1), shown = m ? made : t >= END ? NT : 0;
-        C.pill(ctx, 0, 0, m ? '스트리밍' : '한 번에 받기', m ? 'ok' : 'warn');
-        C.box(ctx, 0, 32, w, 118, { fill: '#fff', r: 10 });
-        C.text(ctx, '사용자 화면', 10, 48, { size: 10, weight: 600 });
-        const q = '배포가 느린 이유?', qw = tw(ctx, q, 11, 600) + 18;
-        ctx.beginPath(); ctx.roundRect(w - 10 - qw, 40, qw, 22, 8); ctx.fillStyle = BLUE[0]; ctx.fill();
-        C.text(ctx, q, w - 10 - qw / 2, 51.5, { weight: 600, color: BLUE[1], align: 'center', base: 'middle' });
-        let left = (shown / NT) * LT;
-        LINES.forEach((f, j) => {
-          const lw = (w - 40) * Math.min(f, Math.max(0, left));
-          left -= f;
-          if (lw > 0) { ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.roundRect(10, 74 + j * 12, lw, 6, 3); ctx.fill(); }
-        });
-        if (run >= 0 && shown === 0) C.text(ctx, `응답 기다리는 중${'.'.repeat(1 + Math.floor(time * 3) % 3)}`, 10, 92, { size: 11, weight: 600, color: ORANGE[1] });
-        if (run < 0) idle(ctx, w / 2, 100, '질문 보내기');
-        const x0 = 40, x1 = w - 8, top = 166, X = (v) => x0 + (clamp(v, 0, SPAN) / SPAN) * (x1 - x0), base = top + 72;
-        [['모델', 0], ['화면', 1]].forEach(([s, j]) => C.text(ctx, s, 0, top + j * 34 + 15, { size: 10, weight: 600, color: U.text, base: 'middle' }));
-        C.line(ctx, [[x0, top - 4], [x0, base], [x1, base]], U.text, 1.2);
-        for (let v = 1000; v <= 3000; v += 1000) { C.line(ctx, [[X(v), base - 3], [X(v), base + 3]], U.muted, 1); C.text(ctx, `${v / 1000}초`, X(v), base + 14, { size: 9, align: 'center' }); }
-        const blk = (j, a, b, fill) => { if (t <= a) return; const bx = X(a) + 0.5, bw = X(Math.min(t, b)) - bx - 0.5; if (bw > 0) { ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(bx, top + j * 34 + 4, bw, 22, Math.min(5, bw / 2)); ctx.fill(); } };
-        blk(0, 0, TT, '#f59e0b');
-        for (let i = 0; i < NT; i++) {
-          const a = TT + i * GAP;
-          blk(0, a, a + GAP * 0.7, U.blue);
-          if (m) blk(1, a + 20, a + 20 + GAP * 0.7, '#64748b');
-        }
-        if (!m) blk(1, END, END + 220, '#64748b');
-        const first = m ? TT + 20 : END;
-        if (run >= 0 && t >= first) C.event(ctx, X(first), top + 2, base, '첫 글자', m ? GREEN[1] : U.red, m ? 'left' : 'center');
-        if (t > 0 && t < SPAN) C.dashed(ctx, X(t), top - 4, X(t), base, U.now);
-        C.stamp(ctx, w / 2, 112, m ? '0.3초에 첫 글자' : '3초 동안 빈 화면', m ? 'ok' : 'bad', (run - SEC + 0.3) / 0.4);
-        say(run < 0 ? '질문 보내기 버튼을 누르면 모델이 답을 만들기 시작한다.' : `${m ? '스트리밍' : '한 번에 받기'}. ${notes[m]}`);
-      },
-    });
-  });
 
   // Tool loop: the app sends tools, the model asks for a call, the app runs it and sends the result back.
   each('loop', (root) => {
@@ -450,48 +356,16 @@
     });
   });
 
-  // Model size: parameters times bytes per parameter, against a 24GB GPU.
-  each('weights', (root) => {
-    const SEC = 5.5, HOLD = 2.2, GPU = 24;
-    // Data: ollama.com/library/llama3/tags (instruct fp16, q8_0, q4_0).
-    const S = [
-      { name: '8B 모델', max: 20, calc: '80억 × 2바이트 = 16GB', bars: [['FP16', 16, '16GB'], ['8비트', 8.5, '8.5GB'], ['4비트', 4.7, '4.7GB']], stamp: ['셋 다 24GB 안', 'ok'], note: '8B 모델은 FP16 16GB, 4비트 4.7GB로 셋 다 24GB GPU에 들어간다.' },
-      { name: '70B 모델', max: 150, calc: '700억 × 2바이트 = 140GB', bars: [['FP16', 141, '141GB'], ['8비트', 75, '75GB'], ['4비트', 40, '40GB']], stamp: ['4비트도 40GB', 'bad'], note: '70B 모델은 4비트로 줄여도 40GB라 24GB GPU 하나에 들어가지 않는다.' },
-    ];
-    hwa.scene(root, {
-      height: 246, still: S.length * (SEC + HOLD) - HOLD + 0.8, scenes: hwa.loopScenes(SEC, HOLD, 2), notes: S.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, k } = hwa.loop(time, SEC, HOLD, 2), s = S[i], run = (time % (2 * (SEC + HOLD))) - i * (SEC + HOLD);
-        C.pill(ctx, 0, 0, s.name, i ? 'bad' : 'info');
-        C.text(ctx, s.calc, 0, 46, { size: 11, weight: 600, color: U.text });
-        const x0 = 46, x1 = w - 50, X = (v) => x0 + (Math.min(v, s.max) / s.max) * (x1 - x0), gx = X(GPU), top = 68;
-        s.bars.forEach(([label, v, txt], j) => {
-          const y = top + j * 38, f = ease(k, 0.05 + j * 0.15, 0.55 + j * 0.15), end = v * f;
-          C.text(ctx, label, 0, y + 11, { size: 10, weight: 600, color: U.text, base: 'middle' });
-          ctx.fillStyle = U.cell;
-          ctx.fillRect(x0, y, x1 - x0, 22);
-          ctx.fillStyle = U.blue;
-          ctx.fillRect(x0, y, X(Math.min(end, GPU)) - x0, 22);
-          if (end > GPU) { ctx.fillStyle = '#fca5a5'; ctx.fillRect(gx, y, X(end) - gx, 22); }
-          if (f > 0.95) C.text(ctx, txt, X(v) + 5, y + 11.5, { size: 11, weight: 700, color: v > GPU ? U.red : U.text, base: 'middle' });
-        });
-        C.event(ctx, gx, top - 2, top + 3 * 38 - 12, 'GPU 24GB', U.red);
-        [0, s.max / 2, s.max].forEach((v) => C.text(ctx, `${v}GB`, X(v), top + 3 * 38 + 6, { size: 9, align: v ? (v === s.max ? 'right' : 'center') : 'left' }));
-        C.stamp(ctx, (x0 + x1) / 2, top + 3 * 38 + 36, s.stamp[0], s.stamp[1], (run - SEC) / 0.4);
-        say(`${s.name}. ${s.calc}. ${s.note}`);
-      },
-    });
-  });
-
-  // Demo: an 8B model on a 12GB GPU. FP16 spills 4GB into system memory; 4-bit fits.
+  // Demo: Llama 3.1 8B on a 12GB GPU. FP16 spills 4GB into system memory; 4-bit fits.
+    // Data: ollama.com/library/llama3.1/tags (8b-instruct-fp16 16GB, 8b q4_K_M 4.9GB).
   each('quant', (root) => {
     const COLS = 12, SEC = 4.6;
-    const notes = ['FP16 16GB는 GPU 12GB에 다 못 올라가 4GB가 시스템 메모리로 밀려난다.', '4비트 4.7GB는 GPU에 다 들어가고, 남은 칸을 KV 캐시와 여유로 쓴다.'];
+    const notes = ['FP16 16GB는 GPU 12GB에 다 못 올라가 4GB가 시스템 메모리로 밀려난다.', '4비트 4.9GB는 GPU에 다 들어가고, 남은 7GB를 KV 캐시와 여유로 쓴다.'];
     hwa.scene(root, {
       height: 232, still: SEC, notes,
-      demo: { modes: ['FP16 (16GB)', '4비트 (4.7GB)'], run: '모델 올리기' },
+      demo: { modes: ['FP16 (16GB)', '4비트 (4.9GB)'], run: '모델 올리기' },
       frame: (ctx, w, h, time, say, ui) => {
-        const m = ui.mode, run = demoRun(ui, time), need = m ? 9.4 : 32, got = run < 0 ? 0 : clamp(run / (SEC - 1)) * need;
+        const m = ui.mode, run = demoRun(ui, time), need = m ? 9.8 : 32, got = run < 0 ? 0 : clamp(run / (SEC - 1)) * need;
         C.pill(ctx, 0, 0, m ? '4비트' : 'FP16', m ? 'ok' : 'warn');
         C.text(ctx, '칸 하나 = 0.5GB', w, 11, { size: 10, align: 'right', base: 'middle' });
         const cs = Math.min(26, Math.floor((w - 20 - (COLS - 1) * 4) / COLS)), gw = COLS * cs + (COLS - 1) * 4, gx = (w - gw) / 2;
@@ -516,13 +390,13 @@
     });
   });
 
-  // KV cache: Llama 2 7B FP16 weights stay at 14GB while the cache grows 0.5MB per token of context.
+  // KV cache: Llama 3.1 8B FP16 weights stay at 16GB while the cache grows 128KB per token.
   each('kv', (root) => {
-    const WGT = 14, PER = 0.5 / 1024, MAXC = 32768, GPU = 24, MAX = 32, SEC = 7, HOLD = 2.2, CROSS = (GPU - WGT) / PER;
-    // Data: NVIDIA, Mastering LLM Techniques: Inference Optimization (Llama 2 7B, 4,096 tokens = 2GB).
+    const WGT = 16, PER = 0.125 / 1024, MAXC = 131072, GPU = 24, MAX = 32, SEC = 7, HOLD = 2.2, CROSS = (GPU - WGT) / PER;
+    // Data: config.json of Llama 3.1 8B: 2 x 32 layers x 8 KV heads x 128 dim x 2 bytes = 128KB.
     hwa.scene(root, {
       height: 250, still: SEC + 0.6,
-      notes: ['가중치 14GB는 그대로인데 KV 캐시가 토큰마다 0.5MB씩 늘어, 컨텍스트 약 2만 토큰에서 24GB를 넘는다.'],
+      notes: ['가중치 16GB는 그대로인데 KV 캐시가 토큰마다 128KB씩 늘어, 컨텍스트 64k에서 24GB에 닿고 128k에서 KV 캐시만 16GB가 된다.'],
       frame: (ctx, w, h, time, say) => {
         const { k } = hwa.loop(time, SEC, HOLD, 1), c = k * MAXC, over = c >= CROSS, run = time % (SEC + HOLD);
         C.pill(ctx, 0, 0, `컨텍스트 ${fmt(c)}토큰`, over ? 'bad' : 'info');
@@ -535,48 +409,15 @@
           C.line(ctx, pts((v) => WGT + v * PER), U.purple, 2);
         }
         C.dashed(ctx, x0, Y(GPU), x1, Y(GPU), U.red);
-        if (c > 5000) C.text(ctx, '가중치 14GB', x0 + 6, Y(WGT / 2), { size: 10, weight: 600, color: BLUE[1], base: 'middle' });
-        if (c > 16000) C.text(ctx, 'KV 캐시', X(c) - 6, Y(WGT + 1.6), { size: 10, weight: 600, color: PURPLE[1], align: 'right', base: 'middle' });
+        if (c > 20000) C.text(ctx, '가중치 16GB', x0 + 6, Y(WGT / 2), { size: 10, weight: 600, color: BLUE[1], base: 'middle' });
+        if (c > 64000) C.text(ctx, 'KV 캐시', X(c) - 6, Y(WGT + 1.6), { size: 10, weight: 600, color: PURPLE[1], align: 'right', base: 'middle' });
         if (over) C.event(ctx, X(CROSS), y0 + 14, y0 + H, '24GB 넘음', U.red);
-        [0, 8192, 16384, 24576, 32768].forEach((v) => C.text(ctx, `${v / 1024}k`, X(v), y0 + H + 16, { size: 10, align: 'center' }));
+        [0, 32768, 65536, 98304, 131072].forEach((v) => C.text(ctx, `${v / 1024}k`, X(v), y0 + H + 16, { size: 10, align: 'center' }));
         if (c > 0) C.dot(ctx, X(c), Y(WGT + c * PER), over ? U.red : U.purple, `${(WGT + c * PER).toFixed(1)}GB`);
         C.stamp(ctx, (x0 + x1) / 2 + 24, Y(7), 'KV 캐시만 16GB', 'bad', (run - SEC) / 0.4);
-        say(`컨텍스트 ${fmt(c)}토큰. 가중치 14GB에 KV 캐시 ${(c * PER).toFixed(1)}GB를 더해 ${(WGT + c * PER).toFixed(1)}GB.`);
+        say(`컨텍스트 ${fmt(c)}토큰. 가중치 16GB에 KV 캐시 ${(c * PER).toFixed(1)}GB를 더해 ${(WGT + c * PER).toFixed(1)}GB.`);
       },
     });
   });
 
-  // Same client code against a cloud endpoint or a local server: only base_url changes.
-  each('local', (root) => {
-    const SEC = 5.6, HOLD = 2;
-    const S = [
-      { pill: '클라우드 API', tone: 'info', grp: '클라우드', t: 'Azure OpenAI', s: 'v1 API', gpu: '데이터센터 GPU', url: 'https://<리소스>.openai.azure.com/openai/v1/', note: '클라우드 API는 base_url이 Azure 리소스 주소다. 연산은 데이터센터 GPU에서 한다.' },
-      { pill: '로컬 서버', tone: 'ok', grp: '내 PC', t: 'Ollama', s: '127.0.0.1:11434', gpu: '내 GPU', url: 'http://localhost:11434/v1/', note: '로컬 서버도 OpenAI 호환 API를 열어 두어, 같은 코드에서 base_url만 바꾸면 된다.' },
-    ];
-    hwa.scene(root, {
-      height: 230, still: SEC + HOLD + SEC, scenes: hwa.loopScenes(SEC, HOLD, 2), notes: S.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), s = S[i], aw = Math.round(w * 0.34), rx = Math.round(w * 0.5), rw = w - rx;
-        C.pill(ctx, 0, 0, s.pill, s.tone);
-        C.group(ctx, 0, 32, aw, 132, '내 앱', 48);
-        C.card(ctx, { x: 10, y: 72, w: aw - 20, h: 48, t: '앱', s: 'OpenAI 클라이언트' }, { lit: t > 4.2 });
-        C.group(ctx, rx, 32, rw, 132, s.grp, 48);
-        C.card(ctx, { x: rx + 10, y: 58, w: rw - 20, h: 44, t: s.t, s: s.s }, { lit: t > 1.4 && t < 2.2 });
-        C.card(ctx, { x: rx + 10, y: 114, w: rw - 20, h: 38, t: s.gpu, size: 11 }, { lit: t > 2.2 && t < 3 });
-        const up = [[aw - 10, 88], [rx + 10, 80]], dn = [[rx + 10, 94], [aw - 10, 104]];
-        C.arrow(ctx, up, 1, '#e2e8f0', { width: 1 });
-        C.arrow(ctx, dn, 1, '#e2e8f0', { width: 1 });
-        fly(ctx, '요청', up, t, 0.4, 1.4, BLUE);
-        for (let j = 0; j < 5; j++) fly(ctx, '토큰', dn, t, 2.8 + j * 0.3, 3.4 + j * 0.3, PURPLE);
-        C.box(ctx, 0, 176, w, 46, { fill: U.plot, r: 8 });
-        C.text(ctx, 'base_url', 10, 191, { size: 10, weight: 600 });
-        ctx.font = '600 11px ui-monospace, SFMono-Regular, Consolas, monospace';
-        ctx.fillStyle = i ? GREEN[1] : BLUE[1];
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(s.url, 10, 208);
-        say(`${s.pill}. base_url ${s.url}. ${s.note}`);
-      },
-    });
-  });
 })();

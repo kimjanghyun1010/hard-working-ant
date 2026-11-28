@@ -1,4 +1,4 @@
-// Jenkins pipeline post: controller and agents, Groovy on the controller, shared library, chained jobs, kaniko, roles.
+// Jenkins pipeline post: controller and agents, Groovy on the controller, quoting, pod agents, kaniko, shared library, roles.
 (() => {
   const U = hwa.ui, C = hwa.cv;
   const ease = (t, a, b) => hwa.smooth((t - a) / (b - a));
@@ -217,44 +217,6 @@
     });
   });
 
-  // Kubernetes pod template with several containers against an ECS task with one container that carries kaniko.
-  each('ecs', (root) => {
-    const SEC = 5.5, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const notes = [
-      '파드 템플릿은 컨테이너를 여럿 둔다. 이미지 빌드 단계만 kaniko 컨테이너로 옮겨 간다.',
-      'ECS 템플릿은 컨테이너가 하나라, kaniko 실행 파일을 에이전트 이미지에 넣어 한 컨테이너에서 돌린다.',
-    ];
-    hwa.scene(root, {
-      height: 236, still: S.at(1) + SEC, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), pw = (w - 12) / 2;
-        C.pill(ctx, 0, 0, i ? 'ECS 태스크' : '쿠버네티스 파드', 'info');
-        const yb = (j) => 64 + j * 40;
-        fade(ctx, i ? 0.45 : 1, () => {
-          C.group(ctx, 0, 32, pw, 176, '쿠버네티스 파드');
-          ['jnlp', 'kaniko', 'kubectl'].forEach((s, j) => C.card(ctx, { x: 10, y: yb(j), w: pw - 20, h: 32, t: s }, !i && j === 1 && t >= 2.4 ? { lit: true, ...tint(BLUE) } : {}));
-          C.text(ctx, '컨테이너 3개', pw / 2, 196, { size: 10, align: 'center' });
-        });
-        fade(ctx, i ? 1 : 0.45, () => {
-          const x = pw + 12;
-          C.group(ctx, x, 32, pw, 176, 'ECS 태스크');
-          C.box(ctx, x + 10, 56, pw - 20, 124, { fill: '#fff', stroke: '#cbd5e1' });
-          C.text(ctx, '에이전트 컨테이너', x + pw / 2, 72, { size: 10, weight: 600, align: 'center' });
-          ['inbound-agent', 'kaniko 실행 파일', '레지스트리 인증'].forEach((s, j) => {
-            const on = i && j === 1 && t >= 2.4;
-            C.box(ctx, x + 18, 84 + j * 30, pw - 36, 24, { fill: on ? BLUE[0] : U.plot, stroke: on ? BLUE[2] : U.grid, r: 6 });
-            C.text(ctx, s, x + pw / 2, 96.5 + j * 30, { size: 10, weight: 600, color: on ? BLUE[1] : U.text, align: 'center', base: 'middle' });
-          });
-          C.text(ctx, '컨테이너 1개', x + pw / 2, 196, { size: 10, align: 'center' });
-        });
-        const p = i ? mix([pw + 12 + pw / 2, 96], [pw + 12 + pw / 2, 126], ease(t, 1.0, 2.4)) : mix([pw / 2, yb(0) + 16], [pw / 2, yb(1) + 16], ease(t, 1.0, 2.4));
-        tag(ctx, '이미지 빌드', p[0], p[1], [U.blue, '#fff', U.blue], ease(t, 0.3, 0.9) * (1 - ease(t, 2.2, 2.6)));
-        C.text(ctx, i ? 'agent { label \'ecs\' }' : "container('kaniko')", i ? pw + 12 + pw / 2 : pw / 2, 226, { size: 10, weight: 600, color: U.text, align: 'center' });
-        say(notes[i]);
-      },
-    });
-  });
-
   // Same parsing work done by Groovy on the controller or by a shell step on the agent. Times are rough, for shape.
   lanes('cps', [
     {
@@ -268,54 +230,6 @@
       gaps: [[0, 1, 34, 'idle', '다른 빌드에 씀']], stamp: ['컨트롤러 2초 사용', 'ok'], say: 'sh로 넘기면 같은 30초를 에이전트가 쓰고, 컨트롤러는 결과 한 줄만 받는다.',
     },
   ], { LH: 44, SEC: 6, legend: [['ctl', 'Groovy'], ['run', 'sh 스텝'], ['heavy', '파싱']], demo: { modes: ['Groovy로 파싱', 'sh로 파싱'], run: '빌드 실행' } });
-
-  // Declarative skeleton: stages light up in order; after a failure the rest is skipped and post still runs.
-  each('skeleton', (root) => {
-    const S = seq([6, 6.5], 2);
-    const notes = ['stage가 차례로 돌고, 다 끝나면 post의 success와 always가 돈다.', '이미지 stage가 실패하면 배포는 건너뛰지만 post의 failure와 always는 돈다.'];
-    const STG = ['빌드', '이미지', '배포'], POST = ['always', 'success', 'failure'];
-    hwa.scene(root, {
-      height: 270, still: S.at(1) + 6.5, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = S.pos(time), wide = w >= 480, fail = i === 1;
-        C.pill(ctx, 0, 0, fail ? '이미지 stage 실패' : '정상 실행', fail ? 'bad' : 'ok');
-        C.box(ctx, 0, 32, w, 230, { fill: U.plot, r: 10 });
-        C.text(ctx, 'pipeline', 10, 48, { weight: 700, color: U.text });
-        const ix = 10, iw = w - 20;
-        [['agent', wide ? 'kubernetes { yaml ... }  전체 stage의 실행 위치' : 'kubernetes 파드'], ['environment', wide ? 'REGISTRY, TAG  모든 stage의 환경 변수' : 'REGISTRY, TAG']].forEach(([k, v], j) => {
-          const y = 56 + j * 32;
-          C.box(ctx, ix, y, iw, 26, { fill: '#fff', r: 6 });
-          C.text(ctx, k, ix + 10, y + 13.5, { weight: 600, color: U.text, base: 'middle' });
-          C.text(ctx, v, ix + iw - 10, y + 13.5, { size: 10, align: 'right', base: 'middle' });
-        });
-        C.box(ctx, ix, 122, iw, 84, { fill: '#fff', r: 8 });
-        C.text(ctx, 'stages', ix + 10, 138, { weight: 600, color: U.text });
-        const sw = (iw - 20 - 16) / 3;
-        STG.forEach((name, j) => {
-          const a = 0.6 + j * 1.5, b = a + 1.5, x = ix + 10 + j * (sw + 8);
-          let st = t < a ? 'idle' : t < b ? 'run' : 'done';
-          if (fail && j === 1 && st === 'done') st = 'fail';
-          if (fail && j === 2) st = t >= 3.6 ? 'skip' : 'idle';
-          const look = { run: { lit: true, ...tint(BLUE) }, done: tint(GREEN), fail: tint(RED), skip: { dim: true, fill: U.cell, dash: [3, 3] } }[st] || {};
-          const sub = { idle: 'steps', run: '실행 중', done: '성공', fail: '실패', skip: '건너뜀' }[st];
-          C.card(ctx, { x, y: 146, w: sw, h: 50, t: name, s: sub }, look);
-        });
-        C.box(ctx, ix, 214, iw, 38, { fill: '#fff', r: 8 });
-        C.text(ctx, 'post', ix + 10, 233.5, { weight: 600, color: U.text, base: 'middle' });
-        const pa = fail ? 4.6 : 5.2;
-        let rx = ix + iw - 8;
-        POST.slice().reverse().forEach((s) => {
-          const cw = tw(ctx, s, 10, 600) + 14, on = t >= pa && (s === 'always' || s === (fail ? 'failure' : 'success'));
-          tag(ctx, s, rx - cw / 2, 233, on ? (s === 'failure' ? RED : GREEN) : MUTE);
-          rx -= cw + 6;
-        });
-        const end = fail ? 6.5 : 6;
-        const sv = fail ? '실패해도 post 실행' : '성공 후 post 실행';
-        if (run > end) C.stamp(ctx, w - (tw(ctx, sv, 13, 700) + 28) / 2 - 2, 15, sv, fail ? 'warn' : 'ok', (run - end) / 0.4);
-        say(notes[i]);
-      },
-    });
-  });
 
   // Double quotes: Groovy puts the secret into the command before it leaves the controller. Single quotes: the shell reads it.
   each('quote', (root) => {
@@ -401,26 +315,11 @@
     });
   });
 
-  // Chained jobs: with wait the base job holds its agent until the deploy jobs finish; without it the base job ends at the trigger.
-  const down = [[1, 31, 70, 'run', '앱 a 빌드'], [2, 31, 64, 'run', '앱 b 빌드']];
-  lanes('chain', [
-    {
-      pill: 'wait: true', tone: 'bad', span: 80, lanes: ['베이스 Job', '배포 Job a', '배포 Job b'], ticks: [[40, '40초'], [80, '80초']],
-      segs: [[0, 0, 30, 'run', '베이스 이미지'], ...down], gaps: [[0, 30, 70, 'wait', '배포 Job 대기']],
-      event: [30, '트리거'], stamp: ['베이스 에이전트 70초 점유', 'bad'], say: '베이스 Job이 배포 Job 둘이 끝날 때까지 에이전트를 잡고 기다려 70초에 끝난다.',
-    },
-    {
-      pill: 'wait: false', tone: 'ok', span: 80, lanes: ['베이스 Job', '배포 Job a', '배포 Job b'], ticks: [[40, '40초'], [80, '80초']],
-      segs: [[0, 0, 30, 'run', '베이스 이미지'], [0, 30, 31, 'ctl', ''], ...down],
-      event: [30, '트리거'], stamp: ['베이스 31초에 끝남', 'ok'], say: '트리거만 하고 바로 끝나 31초에 에이전트를 놓는다. 배포 Job이 하는 일은 같다.',
-    },
-  ], { LH: 36, legend: [['run', '빌드'], ['wait', '대기']], demo: { modes: ['wait: true', 'wait: false'], run: '베이스 이미지 빌드' } });
-
   // docker build needs a daemon the node no longer has; kaniko builds layers itself; in one shared container it wipes the workspace.
   each('kaniko', (root) => {
     const S = seq([5, 7, 6.5], 1.8);
     const notes = [
-      'docker build는 노드의 dockerd에 일을 맡기는데, 쿠버네티스 1.24부터 노드에는 containerd만 있다.',
+      'docker build는 노드의 dockerd에 일을 맡기는데, 쿠버네티스 1.24 이후 노드에는 보통 containerd만 있다.',
       'kaniko는 Dockerfile 명령을 자기 컨테이너 안에서 실행하고, 명령마다 레이어를 떠서 레지스트리로 바로 보낸다.',
       '에이전트와 kaniko가 한 컨테이너면, 멀티스테이지의 다음 FROM에서 kaniko가 workspace까지 지운다.',
     ];

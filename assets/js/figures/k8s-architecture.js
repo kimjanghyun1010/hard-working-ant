@@ -1,7 +1,6 @@
-// Kubernetes architecture post: cluster map, request flow, API server, etcd quorum, scheduler, workloads, operator.
+// Kubernetes architecture post: request flow, API server, etcd quorum, scheduler, pod, reconcile loop, operator.
 (() => {
   const U = hwa.ui, C = hwa.cv, TAU = Math.PI * 2;
-  const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
   const ease = (t, a, b) => hwa.smooth((t - a) / (b - a));
   const mix = (p, q, k) => [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
   const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
@@ -9,13 +8,6 @@
   const RED = ['#fee2e2', '#dc2626', '#fca5a5'], PURPLE = ['#ede9fe', '#6d28d9', '#c4b5fd'], GRAY = [U.cell, U.muted, '#e2e8f0'];
   const LINE = '#cbd5e1';
   const each = (id, fn) => document.querySelectorAll(`[data-figure="k8s-architecture-${id}"]`).forEach(fn);
-  // Scenes of unequal length, each followed by the same hold.
-  const seq = (lens, hold) => {
-    const L = lens.map((l) => l + hold), T = L.reduce((a, b) => a + b, 0);
-    const at = (i) => L.slice(0, i).reduce((a, b) => a + b, 0);
-    const of = (time) => { let x = time % T, i = 0; while (i < L.length - 1 && x >= L[i]) x -= L[i++]; return i; };
-    return { n: lens.length, at, of, pos: (time) => { const i = of(time), run = (time % T) - at(i); return { i, run, t: Math.min(run, lens[i]) }; } };
-  };
   // Chip centred at (x, y). col = [bg, fg, line].
   const tag = (ctx, s, x, y, col, { w, a = 1, size = 10, dash, h = 18 } = {}) => {
     if (a <= 0) return 0;
@@ -90,30 +82,6 @@
     };
   };
   const EXIST = [[0, 0, 'pod', BLUE], [0, 1, 'pod', BLUE], [1, 0, 'pod', BLUE], [1, 1, 'pod', BLUE]];
-
-  each('cluster', (root) => {
-    const SEC = 5.5, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2), ORDER = ['kubectl', 'cp', 'api', 'etcd', 'sched', 'cm', 'node0', 'node1'];
-    const notes = ['컨트롤 플레인은 무엇을 어디에 띄울지 정하고, 워커 노드는 컨테이너를 돌린다.', '스케줄러, 컨트롤러, kubelet은 서로 부르지 않고 모두 API 서버와만 주고받는다.'];
-    hwa.scene(root, {
-      height: 326, still: S.at(1) + SEC, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), y0 = 32;
-        const show = (k) => (i ? 1 : ease(t, 0.3 + ORDER.indexOf(k) * 0.5, 0.75 + ORDER.indexOf(k) * 0.5));
-        C.pill(ctx, 0, 0, i ? '통신은 API 서버로' : '클러스터 구성', 'info');
-        const B = clusterMap(ctx, w, y0, { show, pods: EXIST });
-        if (i) {
-          const P = routes(B, y0);
-          ['kubectl', 'etcd', 'sched', 'cm', 'kubelet0', 'kubelet1'].forEach((k, j) => {
-            C.line(ctx, P[k], '#a5b4fc', 1.2);
-            const f = (t * 0.45 + j * 0.31) % 1;
-            dot(ctx, at(P[k], f < 0.5 ? f * 2 : 2 - f * 2), U.accent, 4);
-          });
-          C.stamp(ctx, w / 2, y0 + 146, '모두 API 서버를 거친다', 'info', (t - 3.6) / 0.4);
-        }
-        say(notes[i]);
-      },
-    });
-  });
 
   each('flow', (root) => {
     const STEP = 1.5, HOLD = 2.6;
@@ -354,41 +322,6 @@
     });
   });
 
-  each('cycles', (root) => {
-    const SEC = 6.5, HOLD = 2.2, SPAN = 60, P = [['A', U.blue], ['B', U.purple], ['C', '#14b8a6'], ['D', '#f59e0b']];
-    const SCH = [[0, 10], [10, 20], [20, 30], [30, 40]], BIND = [[10, 34], [20, 40], [30, 48], [40, 56]];
-    hwa.scene(root, {
-      height: 200, still: SEC + 0.6,
-      frame: (ctx, w, h, time, say) => {
-        const { k } = hwa.loop(time, SEC, HOLD, 1), t = k * SPAN, lw = w < 480 ? 64 : 92, x0 = lw, x1 = w - 8, X = (v) => x0 + (v / SPAN) * (x1 - x0);
-        C.pill(ctx, 0, 0, '파드 A, B, C, D', 'info');
-        ctx.font = U.font(10);
-        C.legend(ctx, w - P.reduce((x, [s]) => x + 24 + ctx.measureText(s).width, 0) + 12, 11, P.map(([s, c]) => [s, c]));
-        const lanes = [['스케줄링', '주기', 40, 30], ['바인딩', '주기', 84, 58]];
-        lanes.forEach(([a, b, y, hh]) => {
-          C.box(ctx, x0, y, x1 - x0, hh, { fill: U.plot, r: 6 });
-          C.text(ctx, a, 0, y + hh / 2 - 6, { size: 10, weight: 600, color: U.text, base: 'middle' });
-          C.text(ctx, b, 0, y + hh / 2 + 8, { size: 10, base: 'middle' });
-        });
-        const block = (a, b, y, hh, [s, c]) => {
-          if (t <= a) return;
-          const bx = X(a) + 1, bw = X(Math.min(t, b)) - bx - 1;
-          if (bw <= 0) return;
-          ctx.beginPath(); ctx.roundRect(bx, y, bw, hh, Math.min(5, bw / 2)); ctx.fillStyle = c; ctx.fill();
-          if (t >= b && tw(ctx, s, 10, 700) + 6 < bw) C.text(ctx, s, bx + bw / 2, y + hh / 2 + 0.5, { size: 10, weight: 700, color: '#fff', align: 'center', base: 'middle' });
-        };
-        SCH.forEach(([a, b], j) => block(a, b, 44, 22, P[j]));
-        BIND.forEach(([a, b], j) => block(a, b, 88 + (j % 3) * 17, 15, P[j]));
-        const base = 150;
-        C.line(ctx, [[x0, base], [x1, base]], U.text, 1.2);
-        C.text(ctx, '시간', x1, base + 14, { size: 9, align: 'right' });
-        if (k > 0 && k < 1) C.dashed(ctx, X(t), 36, X(t), base, U.now);
-        C.stamp(ctx, (x0 + x1) / 2, 178, '고르기는 하나씩, 반영은 겹쳐서', 'info', (time % (SEC + HOLD) - SEC) / 0.4);
-        say('스케줄링 주기는 파드 하나씩 차례로 돌고, 바인딩 주기는 여러 파드가 겹쳐서 돈다.');
-      },
-    });
-  });
-
   each('pod', (root) => {
     const SEC = 5.5, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
     const notes = ['밖에서 온 요청은 파드 IP의 8080으로 들어가고, 사이드카는 같은 서버를 localhost:8080으로 부른다.', '앱이 볼륨에 쓴 로그를 사이드카가 읽어 로그 저장소로 보낸다.'];
@@ -426,7 +359,7 @@
           tag(ctx, 'log', ...mix([sx2, vy], [sx2, side.y + side.h], ease(t, 1.6, 2.4)), PURPLE, { a: ease(t, 1.5, 1.7) * (1 - ease(t, 2.4, 2.7)), size: 9 });
           const out = [[side.x + side.w, side.y + side.h - 10], [px + pw - 5, side.y + side.h - 10], [px + pw - 5, 212], [cw, 212]];
           if (t > 2.8) { C.line(ctx, out, '#c4b5fd', 1); tag(ctx, 'log', ...at(out, ease(t, 2.8, 4.2)), PURPLE, { size: 9 }); }
-          C.stamp(ctx, px + pw / 2, 74, '같은 볼륨을 둘이 마운트', 'info', (t - 4.4) / 0.4);
+          C.stamp(ctx, px + pw / 2, vol.y - 12, '같은 볼륨을 둘이 마운트', 'info', (t - 4.4) / 0.4);
         }
         say(notes[i]);
       },
@@ -436,11 +369,12 @@
   each('reconcile', (root) => {
     const NAMES = [['test-a', 'test-b', 'test-c'], ['api-7d4b-x2k9', 'api-7d4b-p8mz', 'api-7d4b-q1ns']], NEW = 'api-7d4b-z7tf';
     const notes = ['직접 만든 파드는 지키는 컨트롤러가 없어 지운 만큼 그대로 줄어든다.', 'ReplicaSet 컨트롤러가 원하는 3과 실제 2의 차이를 보고 새 파드를 만들어 3개로 되돌린다.'];
+    const SEC = 5.2, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
     hwa.scene(root, {
-      height: 256, still: 0, notes, demo: { modes: ['파드 직접 생성', 'Deployment'], run: '파드 하나 지우기' },
-      frame: (ctx, w, h, time, say, ui) => {
-        const dep = ui.mode === 1, run = ui.runAt === null ? -1 : time - ui.runAt, names = NAMES[ui.mode];
-        const del = run < 0 ? 0 : ease(run, 0.6, 1.4), born = dep && run >= 2.6, ready = dep && run >= 3.6;
+      height: 256, still: S.at(1) + SEC, scenes: S, notes,
+      frame: (ctx, w, h, time, say) => {
+        const { i, t: run } = hwa.loop(time, SEC, HOLD, 2), dep = i === 1, names = NAMES[i];
+        const del = ease(run, 0.6, 1.4), born = dep && run >= 2.6, ready = dep && run >= 3.6;
         const count = 3 - (del >= 1 ? 1 : 0) + (ready ? 1 : 0), diff = dep && run >= 1.6 && !ready;
         C.pill(ctx, 0, 0, dep ? `파드 ${count}/3` : `파드 ${count}개`, count === 3 ? 'ok' : dep ? 'warn' : 'bad');
         const cb = { x: 0, y: 34, w, h: 56 };
@@ -465,137 +399,8 @@
           unit(ctx, b, s, 'Running', { col: BLUE, size: 10 });
         });
         if (dep && run >= 2.0) C.arrow(ctx, [[w / 2 + 12, cb.y + cb.h], [w / 2 + 12, 146]], ease(run, 2.0, 2.6), U.accent, { width: 2 });
-        if (run >= 0) C.stamp(ctx, w / 2, 222, dep ? '3개로 복구' : '2개로 남음, 아무도 안 살림', dep ? 'ok' : 'bad', (run - (dep ? 4.2 : 2.4)) / 0.4);
-        if (run < 0) hint(ctx, w, 222, '파드 하나 지우기');
-        say(`${dep ? 'Deployment' : '직접 만든 파드'}: 파드 ${count}개. ${notes[ui.mode]}`);
-      },
-    });
-  });
-
-  each('rolling', (root) => {
-    const STEP = 0.95, MAXS = 10;
-    const SC = [
-      { pill: 'maxSurge 1, maxUnavailable 1', st: ['1111', '111tss', '11122', '1tt22ss', '12222', 't2222', '2222'], stamp: ['최소 3개, 빨리 끝남', 'warn'] },
-      { pill: 'maxSurge 1, maxUnavailable 0', st: ['1111', '1111s', '111t2', '1112s', '11t22', '1122s', '1t222', '1222s', 't2222', '2222'], stamp: ['늘 4개, 더 오래 걸림', 'ok'] },
-    ];
-    const S = seq(SC.map((s) => s.st.length * STEP), 2.2);
-    const notes = ['기본값(25%)이면 교체 중에 사용 가능한 파드가 3개까지 줄고, 빨리 끝난다.', 'maxUnavailable 0이면 새 파드가 준비된 뒤에 옛 파드를 내려 4개를 지키고, 더 오래 걸린다.'];
-    const CH = { 1: ['v1', BLUE], t: ['종료', RED], s: ['준비', PURPLE], 2: ['v2', PURPLE] };
-    const avail = (s) => [...s].filter((c) => c === '1' || c === '2').length;
-    hwa.scene(root, {
-      height: 276, still: S.at(1) + SC[1].st.length * STEP + 0.6, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = S.pos(time), sc = SC[i], n = sc.st.length, j = Math.min(n - 1, Math.floor(t / STEP)), f = clamp((t - j * STEP) / (STEP * 0.4));
-        const s = sc.st[j], prev = sc.st[j - 1] || s, av = avail(s);
-        C.pill(ctx, 0, 0, sc.pill, i ? 'ok' : 'warn');
-        C.text(ctx, `사용 가능 ${av}/4`, w, 11, { size: 11, weight: 700, color: av < 4 ? ORANGE[1] : U.text, align: 'right', base: 'middle' });
-        const cw = Math.min(56, (w - 36) / 7);
-        [...s].forEach((c, k) => {
-          const [label, col] = CH[c];
-          tag(ctx, label, cw / 2 + k * (cw + 6), 52, col, { w: cw, h: 24, a: (prev[k] === c ? 1 : 0.3 + 0.7 * f) * (c === 't' ? 0.6 : 1), dash: c === 's' ? [3, 2] : null });
-        });
-        C.text(ctx, '준비 = readiness 통과 전, 종료 = 내려가는 중', 0, 84, { size: 9 });
-        const x0 = 22, y0 = 110, pw = w - x0 - 40, ph = h - y0 - 30, X = (v) => x0 + (v / MAXS) * pw;
-        const Y = C.panel(ctx, x0, y0, pw, ph, { max: 5, ticks: [[0, '0'], [3, '3'], [4, '4'], [5, '5']] });
-        C.text(ctx, '사용 가능한 파드', x0, y0 - 7, { weight: 600, color: U.text });
-        C.dashed(ctx, x0, Y(4), x0 + pw, Y(4), '#94a3b8');
-        C.text(ctx, 'replicas 4', x0 + pw - 4, Y(4) - 5, { size: 9, align: 'right' });
-        const pts = [];
-        for (let k = 0; k <= j; k++) {
-          const a = avail(sc.st[k]), end = k < j ? k + 1 : k + clamp((t - k * STEP) / STEP);
-          pts.push([X(k), Y(a)], [X(end), Y(a)]);
-          if (a < 4) { ctx.fillStyle = 'rgba(245,158,11,0.14)'; ctx.fillRect(X(k), Y(4), X(end) - X(k), Y(a) - Y(4)); }
-        }
-        C.line(ctx, pts, i ? '#16a34a' : U.blue, 2);
-        const last = pts[pts.length - 1];
-        C.dot(ctx, last[0], last[1], av < 4 ? ORANGE[1] : U.text, String(av));
-        C.text(ctx, '교체 진행', x0 + pw, y0 + ph + 14, { size: 10, align: 'right' });
-        C.stamp(ctx, x0 + pw / 2, Y(1.6), sc.stamp[0], sc.stamp[1], (run - n * STEP) / 0.4);
-        say(`${sc.pill}. 사용 가능 ${av}/4. ${notes[i]}`);
-      },
-    });
-  });
-
-  // Disk drawn as a short cylinder.
-  const disk = (ctx, cx, y, w, h, col, a = 1) => fade(ctx, a, () => {
-    const r = 6;
-    ctx.beginPath();
-    ctx.moveTo(cx - w / 2, y + r); ctx.lineTo(cx - w / 2, y + h - r);
-    ctx.ellipse(cx, y + h - r, w / 2, r, 0, Math.PI, 0, true);
-    ctx.lineTo(cx + w / 2, y + r);
-    ctx.ellipse(cx, y + r, w / 2, r, 0, 0, Math.PI, true);
-    ctx.fillStyle = col[0]; ctx.fill(); ctx.strokeStyle = col[2]; ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(cx, y + r, w / 2, r, 0, 0, TAU); ctx.stroke();
-  });
-
-  each('statefulset', (root) => {
-    const SEC = 5, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const SC = [
-      { pill: 'Deployment', names: ['web-7d4b-x2k9', 'web-7d4b-p8mz', 'web-7d4b-q1ns'], next: 'web-7d4b-z7tf', stamp: ['새 이름, 빈 디스크', 'bad'] },
-      { pill: 'StatefulSet', names: ['db-0', 'db-1', 'db-2'], next: 'db-1', pvc: true, stamp: ['같은 이름, 같은 볼륨', 'ok'] },
-    ];
-    const notes = ['Deployment는 새 이름의 파드를 띄우고, 이전 파드가 컨테이너 안에 쓴 데이터는 따라오지 않는다.', 'StatefulSet은 같은 이름 db-1로 다시 띄우고 data-db-1 볼륨을 다시 붙인다.'];
-    hwa.scene(root, {
-      height: 222, still: S.at(1) + SEC, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), sc = SC[i], cw = (w - 16) / 3;
-        const del = ease(t, 0.8, 1.6), born = t >= 2.0, ready = t >= 3.2;
-        C.pill(ctx, 0, 0, sc.pill, i ? 'ok' : 'warn');
-        C.text(ctx, '가운데 파드를 지운다', w, 11, { size: 10, align: 'right', base: 'middle' });
-        sc.names.forEach((s, j) => {
-          const b = { x: j * (cw + 8), y: 40, w: cw, h: 52 }, mid = j === 1, cx = b.x + cw / 2;
-          const linked = !mid || del < 0.5 || ready;
-          if (sc.pvc) {
-            C.line(ctx, [[cx, b.y + b.h], [cx, 132]], linked ? (mid && ready ? '#16a34a' : '#94a3b8') : LINE, mid && ready ? 2 : 1);
-            disk(ctx, cx, 132, Math.min(96, cw - 10), 44, mid && ready ? GREEN : GRAY);
-            C.text(ctx, `data-${s}`, cx, 160, { size: 10, weight: 600, color: U.text, align: 'center', base: 'middle' });
-          } else {
-            const fresh = mid && born, gone = mid && del >= 1 && !born;
-            if (!gone) tag(ctx, fresh ? '빈 디스크' : '쓴 데이터 3GB', cx, 120, fresh ? GRAY : ORANGE, { a: mid && !born ? 1 - del : 1, size: 9 });
-            C.text(ctx, '컨테이너 안', cx, 140, { size: 9, align: 'center' });
-          }
-          if (mid && del > 0) {
-            if (born) {
-              unit(ctx, b, sc.next, ready ? 'Running' : '생성 중', { col: ready ? (i ? GREEN : ORANGE) : ORANGE, dash: ready ? null : [3, 2], size: 10 });
-            } else if (del < 1) fade(ctx, 1 - del * 0.7, () => unit(ctx, b, s, '삭제 중', { col: RED, size: 10 }));
-            else C.box(ctx, b.x, b.y, b.w, b.h, { fill: U.plot, dash: [3, 3], r: 7 });
-            return;
-          }
-          unit(ctx, b, s, 'Running', { col: BLUE, size: 10 });
-        });
-        C.stamp(ctx, w / 2, 200, sc.stamp[0], sc.stamp[1], (t - 3.6) / 0.4);
-        say(notes[i]);
-      },
-    });
-  });
-
-  each('daemonset', (root) => {
-    const SEC = 5, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const notes = ['노드 3이 들어오면 그 노드에 log-agent 파드가 바로 뜬다.', '노드 1이 빠지면 그 노드의 log-agent도 함께 정리된다.'];
-    hwa.scene(root, {
-      height: 244, still: S.at(1) + SEC, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t } = hwa.loop(time, SEC, HOLD, 2), nw = (w - 16) / 3;
-        const ds = { x: 0, y: 36, w: Math.min(240, w), h: 40 };
-        const nodeA = (j) => (i === 0 && j === 2 ? ease(t, 0.6, 1.4) : i === 1 && j === 0 ? 1 - 0.65 * ease(t, 2.6, 3.2) : 1);
-        const agentA = (j) => (i === 0 && j === 2 ? ease(t, 2.2, 2.8) : i === 1 && j === 0 ? 1 - ease(t, 1.6, 2.2) : 1);
-        const nodes = i === 0 ? (t >= 1.0 ? 3 : 2) : t >= 2.2 ? 2 : 3, pods = [0, 1, 2].filter((j) => nodeA(j) > 0.5 && agentA(j) > 0.5).length;
-        C.pill(ctx, 0, 0, `노드 ${nodes}개, log-agent ${pods}개`, nodes === pods ? 'ok' : 'warn');
-        unit(ctx, ds, 'DaemonSet log-agent', '노드마다 하나', { col: PURPLE, lit: (i === 0 && t > 1.6 && t < 2.8) || (i === 1 && t > 1.0 && t < 2.2) });
-        [0, 1, 2].forEach((j) => {
-          const x = j * (nw + 8), y = 104, a = nodeA(j), out = i === 1 && j === 0 && t >= 1.0;
-          fade(ctx, a, () => {
-            C.box(ctx, x, y, nw, 100, { fill: U.plot, stroke: out ? RED[2] : U.grid, dash: out || (i === 0 && j === 2 && t < 1.4) ? [4, 3] : null, r: 10 });
-            C.text(ctx, `노드 ${j + 1}`, x + 10, y + 16, { weight: 600 });
-            if (out) C.text(ctx, '빠짐', x + nw - 8, y + 16, { size: 10, weight: 700, color: U.red, align: 'right' });
-            else if (i === 0 && j === 2) C.text(ctx, '새 노드', x + nw - 8, y + 16, { size: 10, weight: 700, color: ORANGE[1], align: 'right' });
-            tag(ctx, 'app', x + nw / 2, y + 80, GRAY, { w: nw - 20 });
-          });
-          tag(ctx, 'log-agent', x + nw / 2, y + 48, PURPLE, { w: nw - 20, h: 22, a: Math.min(a, agentA(j)) });
-        });
-        if (i === 0 && t > 1.6) C.arrow(ctx, [[ds.x + ds.w / 2, ds.y + ds.h], [ds.x + ds.w / 2, 88], [2 * (nw + 8) + nw / 2, 88], [2 * (nw + 8) + nw / 2, 138]], ease(t, 1.6, 2.2), U.accent, { width: 1.6 });
-        C.stamp(ctx, w / 2, 226, i ? '노드 2개, 파드 2개' : '노드 3개, 파드 3개', 'ok', (t - 3.4) / 0.4);
-        say(notes[i]);
+        C.stamp(ctx, w / 2, 222, dep ? '3개로 복구' : '2개로 남음, 아무도 안 살림', dep ? 'ok' : 'bad', (run - (dep ? 4.2 : 2.4)) / 0.4);
+        say(`${dep ? 'Deployment' : '직접 만든 파드'}: 파드 ${count}개. ${notes[i]}`);
       },
     });
   });

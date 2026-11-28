@@ -1,10 +1,9 @@
-// S3 log system post: search engine storage, ILM, bucket layout, Glue cost, bookmarks, Athena scans, small files.
+// S3 log system post: search engine storage, Glue cost, bookmark edge, Athena scans, small files.
 (() => {
   const U = hwa.ui, C = hwa.cv;
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
   const ease = (t, a, b) => hwa.smooth((t - a) / (b - a));
   const mix = (p, q, k) => [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
-  const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
   // [fill, text, line]
   const BLUE = ['#dbeafe', '#1d4ed8', '#93c5fd'], GREEN = ['#dcfce7', '#15803d', '#86efac'], ORANGE = ['#fef3c7', '#b45309', '#fcd34d'];
@@ -21,11 +20,6 @@
     ctx.fill();
     if (line) { ctx.strokeStyle = col[2]; ctx.lineWidth = 1; ctx.stroke(); }
     ctx.globalAlpha = 1;
-  };
-  const tag = (ctx, s, x, y, col, { a = 1, size = 10 } = {}) => {
-    const cw = tw(ctx, s, size, 600) + 14;
-    rect(ctx, x - cw / 2, y - 9, cw, 18, col, { a, r: 5 });
-    if (a > 0) { ctx.globalAlpha = Math.min(1, a); C.text(ctx, s, x, y + 0.5, { size, weight: 600, color: col[1], align: 'center', base: 'middle' }); ctx.globalAlpha = 1; }
   };
   const dot = (ctx, [x, y], color, r = 4.5) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); };
 
@@ -88,102 +82,6 @@
     });
   });
 
-  // Daily indices age to the right. Without a policy they pile up past disk capacity; delete at 5d holds five.
-  each('ilm', (root) => {
-    const SEC = 7, HOLD = 2, END = 9.6, CAP = 8, KEEP = 5, S = hwa.loopScenes(SEC, HOLD, 2);
-    const notes = [
-      '보관 정책이 없으면 인덱스가 하루에 하나씩 쌓이고, 디스크가 차면 노드를 늘려야 한다.',
-      'delete 단계에 min_age 5d를 걸면 만든 지 5일 된 인덱스가 지워져 디스크가 5일치에서 멈춘다.',
-    ];
-    hwa.scene(root, {
-      height: 212, still: S.at(1) + SEC + 1, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = at(time, SEC, HOLD, 2), d = clamp(t / SEC) * END, sw = w / 11, by = 62, bh = 40;
-        C.pill(ctx, 0, 0, i ? 'delete, min_age 5d' : 'ILM 없음', i ? 'ok' : 'warn');
-        C.text(ctx, `${Math.min(10, Math.floor(d) + 1)}일째`, w, 11, { size: 10, weight: 600, color: U.text, align: 'right', base: 'middle' });
-        C.text(ctx, '오늘 인덱스', 2, by - 8, { size: 9, weight: 600, color: U.blue });
-        C.text(ctx, '오래된 인덱스 →', w - 2, by - 8, { size: 9, align: 'right' });
-        C.line(ctx, [[0, by + bh + 6], [w, by + bh + 6]], U.grid, 1);
-        let n = 0;
-        for (let j = 0; j < 10; j++) {
-          if (d < j) continue;
-          const age = d - j, gone = i && age >= KEEP ? clamp((age - KEEP) / 0.5) : 0, a = clamp((d - j) / 0.3) * (1 - gone);
-          if (a <= 0) continue;
-          n += a;
-          const x = age * sw + 2, col = gone > 0 ? RED : age < 1 ? BLUE : GRAY;
-          rect(ctx, x, by, sw - 4, bh, col, { a, r: 4 });
-          ctx.globalAlpha = a;
-          C.text(ctx, `11.${String(j + 1).padStart(2, '0')}`, x + (sw - 4) / 2, by + bh / 2, { size: 9, weight: 600, color: col[1], align: 'center', base: 'middle' });
-          ctx.globalAlpha = 1;
-        }
-        if (i) C.event(ctx, KEEP * sw, by - 4, by + bh + 6, '', U.red);
-        if (i) C.text(ctx, 'min_age 5d', KEEP * sw + 4, by + bh + 20, { size: 9, weight: 700, color: U.red });
-        // Disk gauge: one index fills a tenth; capacity line at eight.
-        const gy = 138, gx = 34, gw = w - gx, over = n > CAP + 0.05;
-        C.text(ctx, '디스크', 0, gy + 6, { size: 10, weight: 600, color: U.text, base: 'middle' });
-        rect(ctx, gx, gy, gw, 12, GRAY, { r: 4 });
-        ctx.beginPath(); ctx.roundRect(gx, gy, gw * Math.min(n, 10) / 10, 12, 4); ctx.fillStyle = over ? U.red : U.blue; ctx.fill();
-        C.dashed(ctx, gx + gw * CAP / 10, gy - 6, gx + gw * CAP / 10, gy + 18, U.red);
-        C.text(ctx, '용량', gx + gw * CAP / 10, gy + 30, { size: 9, weight: 600, color: U.red, align: 'center' });
-        if (!i && over) C.stamp(ctx, w / 2, gy + 56, '디스크 부족, 노드 증설', 'bad', (d - CAP - 0.2) / 0.4);
-        if (i) C.stamp(ctx, (KEEP * sw + w) / 2, by + bh / 2, '5일치만 유지', 'ok', (run - SEC) / 0.4);
-        say(`${i ? 'delete min_age 5d' : 'ILM 없음'}, ${Math.min(10, Math.floor(d) + 1)}일째, 인덱스 ${Math.round(n)}개. ${notes[i]}`);
-      },
-    });
-  });
-
-  // One bucket: four input prefixes in two layouts, the bookmark state and the Iceberg output. Lifecycle cools inputs only.
-  each('bucket', (root) => {
-    const AWS = ['#f1f5f9', U.muted, '#94a3b8'], ICE = ['#64748b', '#fff', '#475569'];
-    const SEC = 6, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const ROWS = [
-      ['fluentd/{env}/{service}/', 'dt=YYYYMMDD/hour=HH/', BLUE, 'Fluentd'],
-      ['datadog/{env}/{service}/', 'dt=YYYYMMDD/hour=HH/', BLUE, 'Datadog'],
-      ['cloudfront-{service}-{env}/', 'YYYY/MM/DD/HH/', AWS, 'CloudFront'],
-      ['AWSLogs/{acct}/WAFLogs/', '…/YYYY/MM/DD/HH/', AWS, 'WAF'],
-      ['bookmarks/', '어디까지 처리했는지', PURPLE],
-      ['iceberg/', '출력 테이블', GREEN],
-    ];
-    const notes = [
-      'Fluentd와 Datadog은 Hive 스타일(dt=, hour=)로, CloudFront와 WAF는 AWS 기본형(YYYY/MM/DD/HH)으로 떨어진다.',
-      '수명 주기 규칙은 프리픽스로 고른다. 입력 로그만 Glacier로 내리고 bookmarks/와 iceberg/는 그대로 둔다.',
-    ];
-    hwa.scene(root, {
-      height: 304, still: S.at(1) + SEC + 1, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = at(time, SEC, HOLD, 2);
-        C.pill(ctx, 0, 0, i ? '수명 주기 30일' : '소스별 경로', i ? 'info' : 'info');
-        if (w >= 420 && !i) C.legend(ctx, w - 196, 11, [['Hive 스타일', BLUE[2]], ['AWS 기본형', '#94a3b8']]);
-        const sw = Math.round(clamp(w * 0.21, 66, 96)), bx = sw + 14, rx = bx + 8, rw = w - rx - 8, ry = (r) => 58 + r * 40;
-        C.group(ctx, bx, 30, w - bx, 272, 's3://log-bucket', 46);
-        ROWS.forEach(([pre, sub, col, src], r) => {
-          const y = ry(r), cold = i && r < 4 ? ease(t, 1.2 + r * 0.4, 1.8 + r * 0.4) : 0;
-          C.box(ctx, rx, y, rw, 34, { fill: '#fff', stroke: col[2], r: 6 });
-          C.text(ctx, pre, rx + 8, y + 13, { size: 10, weight: 600, color: U.text, base: 'middle' });
-          C.text(ctx, sub, rx + 8, y + 25, { size: 9, color: r < 2 ? BLUE[1] : U.muted, base: 'middle' });
-          if (src) {
-            C.card(ctx, { x: 0, y, w: sw, h: 34, t: src, size: 11 });
-            C.arrow(ctx, [[sw + 2, y + 17], [rx - 2, y + 17]], 1, '#cbd5e1', { width: 1 });
-          }
-          // Three files per row land one after another in scene 1.
-          for (let f = 0; f < 3; f++) {
-            const fx = rx + rw - 14 - (2 - f) * 11, start = 0.4 + r * 0.35 + f * 0.9;
-            const k = i ? 1 : r < 4 ? ease(t, start, start + 0.7) : r === 5 ? ease(t, 3.6 + f * 0.4, 4.1 + f * 0.4) : ease(t, 3.4, 3.8) * (f === 2 ? 1 : 0);
-            if (k <= 0) continue;
-            if (k < 1 && src) { dot(ctx, mix([sw, y + 17], [fx + 4, y + 17], k), col[2], 3.5); continue; }
-            if (r === 4 && f < 2) continue;
-            rect(ctx, fx, y + 10, 8, 14, cold >= 1 ? ICE : col, { a: k, r: 2 });
-          }
-          if (cold >= 1 && tw(ctx, pre, 10, 600) + 16 < rw - 92) C.text(ctx, 'Glacier', rx + rw - 52, y + 17, { size: 9, weight: 700, color: ICE[2], align: 'right', base: 'middle' });
-        });
-        C.card(ctx, { x: 0, y: ry(4), w: sw, h: 74, t: 'ETL', s: 'ECS 태스크', size: 11 });
-        [4, 5].forEach((r) => C.arrow(ctx, [[sw + 2, ry(r) + 17], [rx - 2, ry(r) + 17]], i ? 1 : ease(t, 3.2, 3.6), U.accentLine, { width: 1 }));
-        if (i) C.stamp(ctx, w - tw(ctx, '입력만 Glacier로', 13, 700) / 2 - 30, 12, '입력만 Glacier로', 'info', (run - 3.6) / 0.4);
-        say(notes[i]);
-      },
-    });
-  });
-
   // One Spark job holds 10 DPUs while one or two do the work; one crawl is billed 10 minutes even when it ends in 1.
   each('glue-bill', (root) => {
     const SEC = 6, HOLD = 2.2, S = hwa.loopScenes(SEC, HOLD, 2);
@@ -227,114 +125,6 @@
           if (cur < span) C.dashed(ctx, X(cur, span), y - 6, X(cur, span), base, U.now);
           C.stamp(ctx, (x0 + x1) / 2, y + lh + 62, '1분 일하고 10분 과금', 'bad', (run - SEC + 0.4) / 0.4);
         }
-        say(notes[i]);
-      },
-    });
-  });
-
-  // Lane timelines. demo turns scenes into modes; the run button plays the chosen one once.
-  {
-    const FILL = { prep: '#cbd5e1', cpu: U.blue, crawl: '#a78bfa', live: '#dbeafe' };
-    const tl = (name, scenes, { SEC = 7, HOLD = 1.8, demo } = {}) => each(name, (root) => {
-      const LH = 46, maxL = Math.max(...scenes.map((s) => s.lanes.length)), n = scenes.length;
-      hwa.scene(root, {
-        height: 44 + maxL * LH + 30, still: (n - 1) * (SEC + HOLD) + SEC,
-        scenes: n > 1 && !demo ? hwa.loopScenes(SEC, HOLD, n) : undefined,
-        notes: scenes.map((x) => x.say), demo,
-        frame: (ctx, w, h, time, say, ui) => {
-          const auto = hwa.loop(time, SEC, HOLD, n), i = demo ? ui.mode : auto.i, s = scenes[i];
-          const run = demo ? (ui.runAt === null ? -1 : time - ui.runAt) : (time % ((SEC + HOLD) * n)) - auto.i * (SEC + HOLD), k = clamp(run / SEC), t = k * s.span;
-          C.pill(ctx, 0, 0, s.pill, s.tone);
-          let lx = w;
-          s.legend.slice().reverse().forEach(([kind, label]) => {
-            lx -= tw(ctx, label, 10) + 4;
-            C.text(ctx, label, lx, 11.5, { size: 10, base: 'middle' });
-            lx -= 14;
-            ctx.fillStyle = FILL[kind];
-            ctx.beginPath(); ctx.roundRect(lx, 6, 10, 10, 2); ctx.fill();
-            lx -= 10;
-          });
-          const lw = Math.min(70, w * 0.2), x0 = lw, x1 = w - 8, top = 40, base = top + maxL * LH + 4;
-          const X = (v) => x0 + (clamp(v, 0, s.span) / s.span) * (x1 - x0), ly = (j) => top + j * LH;
-          s.lanes.forEach((nm, j) => C.text(ctx, nm, 0, ly(j) + LH / 2, { size: 10, weight: 600, color: U.text, base: 'middle' }));
-          C.line(ctx, [[x0, top - 4], [x0, base], [x1, base]], U.text, 1.2);
-          s.ticks.forEach(([v, label]) => {
-            C.line(ctx, [[X(v), base - 3], [X(v), base + 3]], U.muted, 1);
-            C.text(ctx, label, X(v), base + 14, { size: 9, align: v >= s.span ? 'right' : 'center' });
-          });
-          s.segs.forEach(([j, a, b, kind, label]) => {
-            if (t <= a) return;
-            const y = ly(j) + 8, bx = X(a) + 0.5, bw = X(Math.min(t, b)) - bx - 0.5;
-            if (bw <= 0) return;
-            ctx.beginPath(); ctx.roundRect(bx, y, bw, LH - 16, Math.min(6, bw / 2)); ctx.fillStyle = FILL[kind]; ctx.fill();
-            if (t >= b && label && tw(ctx, label, 9, 700) + 6 < bw) C.text(ctx, label, bx + bw / 2, y + (LH - 16) / 2 + 0.5, { size: 9, weight: 700, color: kind === 'live' ? BLUE[1] : '#fff', align: 'center', base: 'middle' });
-          });
-          if (k > 0 && k < 1) C.dashed(ctx, X(t), top - 4, X(t), base, U.now);
-          if (run >= SEC) C.stamp(ctx, (x0 + x1) / 2, top + (base - top) / 2, s.stamp[0], s.stamp[1], (run - SEC) / 0.4);
-          if (demo && run < 0) C.text(ctx, `${demo.run} 버튼을 눌러 보자`, (x0 + x1) / 2, top + (base - top) / 2, { size: 12, align: 'center', base: 'middle' });
-          say(`${s.pill}. ${s.say}`);
-        },
-      });
-    });
-
-    // Demo: the same two hours of logs, run as a 30-minute Glue schedule or as one long-running container loop.
-    const runs = [0, 30, 60, 90].flatMap((s) => [[0, s, s + 2, 'prep', ''], [0, s + 2, s + 6, 'cpu', ''], [1, s + 6, s + 16, 'crawl', '10분']]);
-    const loop = [[0, 0, 2, 'prep', ''], [0, 2, 120, 'live', ''], ...Array.from({ length: 29 }, (_, j) => [0, 4 + j * 4, 5 + j * 4, 'cpu', ''])];
-    const ticks = [[30, '30분'], [60, '60분'], [90, '90분'], [120, '2시간']];
-    tl('glue-loop', [
-      { pill: '30분마다 Glue 잡', tone: 'bad', span: 120, lanes: ['Glue 잡', '크롤러'], ticks, legend: [['prep', '준비'], ['cpu', '변환'], ['crawl', '크롤러']], segs: runs, stamp: ['10 DPU 4번, 크롤러 40분', 'bad'], say: '잡이 30분마다 10 DPU로 새로 뜨고, 크롤러가 돌 때마다 10분씩 과금된다. 로그는 최대 30분 늦게 테이블에 들어간다.' },
-      { pill: '상시 컨테이너', tone: 'ok', span: 120, lanes: ['컨테이너'], ticks, legend: [['prep', '준비'], ['live', '대기'], ['cpu', '변환']], segs: loop, stamp: ['한 번 띄움, 크롤러 없음', 'ok'], say: '컨테이너는 필요한 만큼의 크기로 한 번 떠서 몇 분마다 새 파일만 변환한다. 같은 파일을 처리하는데 크롤러는 없다.' },
-    ], { demo: { modes: ['30분마다 Glue 잡', '상시 컨테이너'], run: '2시간 돌리기' } });
-  }
-
-  // Files on a LastModified axis; each run processes files past the watermark and commits the new maximum.
-  each('bookmark', (root) => {
-    const SEC = 6, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-    const H11 = [3, 9, 17, 24, 31, 38, 44, 50, 55], H12 = [62, 70, 79, 88, 96, 104, 111, 116];
-    const notes = [
-      '첫 실행은 hour=11의 파일을 읽고, 그중 가장 늦은 LastModified 11:55를 상태 파일에 커밋한다.',
-      '다음 실행은 기준선 11:55보다 늦은 파일만 읽는다. 앞쪽은 목록에서 보기만 하고 건너뛴다.',
-    ];
-    const clock = (m) => `${11 + Math.floor(m / 60)}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
-    hwa.scene(root, {
-      height: 226, still: S.at(1) + SEC + 1, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = at(time, SEC, HOLD, 2);
-        C.pill(ctx, 0, 0, i ? '두 번째 실행' : '첫 실행', 'info');
-        C.text(ctx, 'S3 객체, LastModified 순', w, 11, { size: 10, align: 'right', base: 'middle' });
-        const x0 = 4, x1 = w - 4, X = (m) => x0 + (m / 120) * (x1 - x0), y0 = 40, fy = 70;
-        [[0, 'hour=11'], [60, 'hour=12']].forEach(([m, s]) => {
-          C.box(ctx, X(m) + 1, y0, X(m + 60) - X(m) - 2, 58, { fill: U.plot, r: 6 });
-          C.text(ctx, s, X(m) + 8, y0 + 13, { size: 9, weight: 600 });
-        });
-        [[0, '11:00'], [60, '12:00'], [120, '13:00']].forEach(([m, s]) => C.text(ctx, s, X(m), y0 + 72, { size: 9, align: m ? (m === 120 ? 'right' : 'center') : 'left' }));
-        const wm0 = i ? 55 : 0, wm1 = i ? 116 : 55, wm = wm0 + (wm1 - wm0) * ease(t, 4.2, 4.9);
-        const runA = i ? 2.4 : 1.0, runB = i ? 4.0 : 3.6;
-        const fileAt = (m, j, list, newer) => {
-          const show = i && list === H12 ? ease(t, 0.3 + j * 0.2, 0.6 + j * 0.2) : 1;
-          const done = (!i && list === H11) || (i && list === H12) ? t >= runA + (j / list.length) * (runB - runA) : i;
-          rect(ctx, X(m) - 4, fy, 8, 18, done ? ['#4ade80', '#fff', '#16a34a'] : newer ? BLUE : GRAY, { a: show, r: 2 });
-        };
-        H11.forEach((m, j) => fileAt(m, j, H11, !i));
-        if (i) H12.forEach((m, j) => fileAt(m, j, H12, true));
-        if (i && t > runA - 0.4) {
-          ctx.fillStyle = C.hatch(ctx, '#e2e8f0');
-          ctx.fillRect(X(0) + 1, fy + 22, X(55) - X(0) - 2, 6);
-          C.text(ctx, '건너뜀', X(27), fy + 4 - 9, { size: 9, align: 'center', color: U.muted });
-        }
-        C.event(ctx, X(wm), y0 - 2, y0 + 60, '', '#7c3aed');
-        C.text(ctx, `기준선 ${clock(wm)}`, Math.min(X(wm) + 4, x1 - 64), y0 + 84, { size: 9, weight: 700, color: '#7c3aed' });
-        // State file: the watermark and file count the next run reads.
-        const cy = 140, cw = Math.min(w, 330), cx = 0, committed = t >= 4.9;
-        C.box(ctx, cx, cy, cw, 78, { fill: '#fff', stroke: PURPLE[2] });
-        C.text(ctx, 'bookmarks/etl/api-gateway.json', cx + 10, cy + 16, { size: 10, weight: 600, color: U.text });
-        const val = committed ? `${clock(wm1)}:03` : i ? '11:55:03' : '10:58:41';
-        C.text(ctx, '"max_last_modified":', cx + 10, cy + 38, { size: 10 });
-        C.text(ctx, `"${val}"`, cx + 128, cy + 38, { size: 10, weight: 700, color: committed ? '#7c3aed' : U.text });
-        C.text(ctx, '"files_processed":', cx + 10, cy + 58, { size: 10 });
-        C.text(ctx, String(committed ? (i ? H12.length : H11.length) : i ? H11.length : 40), cx + 128, cy + 58, { size: 10, weight: 700, color: committed ? '#7c3aed' : U.text });
-        if (w >= 460) C.stamp(ctx, (cw + w) / 2 + 4, cy + 39, i ? '새 파일만 읽음' : 'hour=11 커밋', 'ok', (run - 5.2) / 0.4);
-        else C.stamp(ctx, w - 66, cy + 50, i ? '새 파일만 읽음' : 'hour=11 커밋', 'ok', (run - 5.2) / 0.4);
         say(notes[i]);
       },
     });
@@ -475,38 +265,6 @@
         if (r >= SEC) C.stamp(ctx, w / 2, ly + 34, B ? '결과 같음, 스캔 1GB' : '결과 같음, 스캔 24배', B ? 'ok' : 'bad', (r - SEC) / 0.4);
         if (r < 0) C.text(ctx, '14시 로그 조회 버튼을 눌러 보자', w / 2, ly + 34, { size: 12, align: 'center', base: 'middle' });
         say(r < 0 ? '14시 로그 조회 버튼을 누르면 스캔하는 폴더를 보여 준다.' : `스캔 ${gb}GB. ${notes[ui.mode]}`);
-      },
-    });
-  });
-
-  // Bytes scanned by one query: no limit, a 1TB per-query limit that cancels it, and a dt predicate.
-  each('cap', (root) => {
-    const SEC = 5.6, HOLD = 2.2, S = hwa.loopScenes(SEC, HOLD, 3);
-    const SC = [
-      { pill: '조건 없음', tone: 'warn', sql: 'WHERE 없음', end: 1.2, dur: 50, stamp: ['1.2TB 스캔, 약 $6', 'warn'], note: '조건 없이 돌린 쿼리는 테이블 1.2TB를 다 읽고 끝난다. 그만큼 과금된다.' },
-      { pill: '쿼리당 한도 1TB', tone: 'bad', sql: 'WHERE 없음', end: 1.2, dur: 50, cap: 1, stamp: ['결과 없이 약 $5', 'bad'], note: '한도에 닿으면 쿼리는 취소되지만 이미 읽은 1TB는 청구된다. 결과는 받지 못한다.' },
-      { pill: 'dt 조건', tone: 'ok', sql: "WHERE dt = '20261102'", end: 0.05, dur: 3, stamp: ['50GB 스캔, 약 $0.25', 'ok'], note: '하루치 dt 조건을 걸면 50GB만 읽는다. 비용을 막는 자리는 한도가 아니라 쿼리 조건이다.' },
-    ];
-    hwa.scene(root, {
-      height: 262, still: S.at(2) + SEC + 1, scenes: S, notes: SC.map((s) => s.note),
-      frame: (ctx, w, h, time, say) => {
-        const { i, t, run } = at(time, SEC, HOLD, 3), s = SC[i], tt = clamp(t / (SEC - 0.4)) * 60;
-        C.pill(ctx, 0, 0, s.pill, s.tone);
-        C.text(ctx, s.sql, w, 11, { size: 10, weight: 600, color: U.text, align: 'right', base: 'middle' });
-        const x0 = 34, x1 = w - 6, y0 = 44, H = 170, X = (v) => x0 + (v / 60) * (x1 - x0);
-        const Y = C.panel(ctx, x0, y0, x1 - x0, H, { max: 1.5, ticks: [[0, '0'], [0.5, '0.5'], [1, '1TB'], [1.5, '1.5']] });
-        [0, 20, 40, 60].forEach((v) => C.text(ctx, `${v}초`, X(v), y0 + H + 15, { size: 9, align: v ? (v === 60 ? 'right' : 'center') : 'left' }));
-        if (s.cap) { C.dashed(ctx, x0, Y(s.cap), x1, Y(s.cap), U.red); C.text(ctx, '쿼리당 한도', x0 + 6, Y(s.cap) - 6, { size: 9, weight: 700, color: U.red }); }
-        const stop = s.cap ? s.dur * s.cap / s.end : s.dur, upto = Math.min(tt, stop), v = (x) => s.end * Math.min(x, s.dur) / s.dur;
-        const pts = []; for (let x = 0; x <= upto + 1e-6; x += 0.5) pts.push([X(x), Y(v(x))]);
-        pts.push([X(upto), Y(v(upto))]);
-        C.area(ctx, pts, Y(0), s.cap ? 'rgba(239,68,68,0.10)' : s.tone === 'ok' ? 'rgba(34,197,94,0.12)' : 'rgba(59,130,246,0.10)');
-        C.line(ctx, pts, s.cap ? U.red : s.tone === 'ok' ? '#16a34a' : U.blue);
-        const val = v(upto);
-        C.dot(ctx, X(upto), Y(val), s.cap ? U.red : s.tone === 'ok' ? '#16a34a' : U.blue, val >= 0.1 ? `${val.toFixed(2)}TB` : `${Math.round(val * 1000)}GB`, Y(val) - (X(upto) > x1 - 60 ? 12 : 0));
-        if (tt >= stop) C.event(ctx, X(stop), y0 + 14, y0 + H, s.cap ? '취소' : '완료', s.cap ? U.red : U.slate, X(stop) > x1 - 30 ? 'center' : 'left');
-        C.stamp(ctx, (x0 + x1) / 2, y0 + H * 0.62, s.stamp[0], s.stamp[1], (run - SEC + 0.2) / 0.4);
-        say(`${s.pill}. 스캔 ${val.toFixed(2)}TB. ${s.note}`);
       },
     });
   });

@@ -1,119 +1,54 @@
 ---
 title: 쿠버네티스 구조
-description: kubectl 요청 하나가 API 서버, etcd, 스케줄러, kubelet을 거쳐 파드로 뜨기까지와 워크로드, 컨트롤러, Operator까지 정리했다.
+description: kubectl apply 한 줄이 API 서버와 etcd에 적히고, 컨트롤러와 스케줄러와 kubelet이 그 기록을 보고 움직여 다른 서버의 컨테이너가 되기까지, 그리고 그 상태를 지키는 조정 루프를 따라간다.
 date: 2026-10-28 12:00:00 +0900
 series: Kubernetes
 tags: [kubernetes, scheduler, etcd, controller, operator]
 scripts: [figures/k8s-architecture.js]
 ---
 
-## 클러스터 구성
+## API 서버와 etcd
 
-`kubectl apply -f deploy.yaml`을 치면 몇 초 뒤 어느 서버에서 컨테이너가 뜬다. 명령을 받은 서버와 컨테이너를 돌리는 서버는 다른 서버다.
+`kubectl apply -f deploy.yaml`을 친 서버와 컨테이너가 뜨는 서버는 다르다. 명령 한 줄이 어떻게 다른 서버의 컨테이너가 되고, 뜬 뒤에는 누가 그 수를 지키나.
 
 쿠버네티스는 여러 서버를 묶은 클러스터(cluster)이고, 그 안의 서버 한 대를 노드라고 한다. 노드는 하는 일에 따라 둘로 나뉜다.
 
-- 컨트롤 플레인(control plane): 무엇을 어디에 띄울지 정하고, 정한 상태를 지킨다.
-- 워커 노드: 컨테이너를 실제로 돌린다.
+- 컨트롤 플레인(control plane): API 서버, etcd, 스케줄러, 컨트롤러 매니저가 돈다. 무엇을 어디에 띄울지 정한다.
+- 워커 노드: kubelet과 컨테이너 런타임(containerd 등)이 돈다. 컨테이너를 실제로 실행한다.
 
-| 위치 | 구성 요소 | 하는 일 |
-|---|---|---|
-| 컨트롤 플레인 | API 서버 (kube-apiserver) | 쿠버네티스 API를 여는 정문. 모든 읽기와 쓰기가 여기를 지난다 |
-| 컨트롤 플레인 | etcd | 클러스터의 모든 상태를 담는 키 값 저장소 |
-| 컨트롤 플레인 | 스케줄러 (kube-scheduler) | 노드가 정해지지 않은 파드에 노드를 골라 준다 |
-| 컨트롤 플레인 | 컨트롤러 매니저 | Deployment, ReplicaSet 같은 컨트롤러를 돌린다 |
-| 워커 노드 | kubelet | 자기 노드에 배정된 파드의 컨테이너가 돌게 한다 |
-| 워커 노드 | kube-proxy | 서비스 주소를 파드로 보내는 네트워크 규칙을 관리한다. 선택 사항이다 |
-| 워커 노드 | 컨테이너 런타임 | containerd처럼 컨테이너를 실제로 실행하는 프로그램 |
-
-kube-proxy는 공식 문서에도 선택 사항으로 적혀 있다. Cilium처럼 네트워크 플러그인이 서비스 처리를 대신하면 띄우지 않는다.
-
-두 장면에서 구성 요소가 어디에 있고 서로 어떤 선으로 이어지는지 본다. 두 번째 장면에서 선이 전부 API 서버로 모이는지 지켜보자.
-
-<figure class="fig" data-figure="k8s-architecture-cluster">
-  <figcaption>컨트롤 플레인과 워커 노드의 구성 요소</figcaption>
-</figure>
-
-스케줄러, 컨트롤러 매니저, kubelet은 서로 직접 부르지 않는다. 각자 API 서버에 걸어 둔 감시(watch)로 바뀐 것을 받아 보고, 할 일을 하면 결과를 다시 API 서버에 적는다. etcd에 접근하는 것도 API 서버 하나뿐이다.
-
-그래서 클러스터가 이상하면 **API 서버와 etcd**부터 본다. 둘이 멈추면 이미 돌던 컨테이너는 그대로 돌지만, 새로 띄우거나 고치는 일은 전부 멈춘다.
-
-## 요청 하나의 흐름
-
-Deployment를 apply하고 `kubectl get pods -o wide`를 연달아 치면 STATUS가 Pending, ContainerCreating, Running 순으로 바뀌고, NODE 칸이 `<none>`에서 노드 이름으로 채워진다. 상태가 바뀌는 자리마다 구성 요소 하나가 일을 마쳤다.
-
-아래 그림은 replicas 1인 Deployment가 파드로 뜨기까지 일곱 단계를 차례로 보여 준다. 왼쪽 위의 STATUS와 오른쪽 위의 NODE가 몇 번 단계에서 바뀌는지 본다.
+etcd에 읽고 쓰는 것은 API 서버 하나뿐이다. 스케줄러, 컨트롤러, kubelet은 서로를 부르지 않고 **한곳에 적힌 상태를 각자 보고 움직인다.** API 서버에서 바뀐 것을 받아 보고, 할 일을 하면 결과를 다시 API 서버에 적는다. 아래 그림처럼 replicas 1인 Deployment가 파드로 뜨기까지 API 서버를 일곱 번 오가는 동안 컨테이너를 실제로 띄우는 단계는 6번 하나다.
 
 <figure class="fig" data-figure="k8s-architecture-flow">
   <figcaption>kubectl apply 한 번이 파드 Running이 되기까지</figcaption>
 </figure>
 
-1. kubectl이 Deployment를 API 서버에 보낸다.
-2. API 서버가 인증, 인가, 검사를 거쳐 etcd에 저장한다.
-3. 컨트롤러 매니저의 Deployment 컨트롤러가 ReplicaSet을 만들고, ReplicaSet 컨트롤러가 파드를 만든다. 이 파드에는 아직 노드가 없다.
-4. 스케줄러가 노드 없는 파드를 보고 노드를 골라 파드에 적는다. 이걸 바인딩(binding)이라고 한다.
-5. 그 노드의 kubelet이 자기 노드에 배정된 파드를 받는다.
-6. kubelet이 컨테이너 런타임에 이미지를 받고 컨테이너를 띄우게 한다.
-7. kubelet이 파드 상태를 API 서버에 보고한다.
+API 서버는 받은 요청을 정해진 순서로 검사한다.
 
-일곱 단계 중 컨테이너를 실제로 띄우는 건 6번 하나다. 나머지는 API 서버에 무언가를 적고, 다른 구성 요소가 그걸 보고 움직이는 일이다. 누가 누구에게 명령하는 구조가 아니라 **etcd에 적힌 상태를 각자 따라가는** 구조다.
-
-파드가 오래 멈춰 있으면 상태로 어느 단계에서 막혔는지 먼저 가른다.
-
-- 파드가 아예 없다: 3번 컨트롤러 단계다. `kubectl describe replicaset`의 Events를 본다.
-- Pending이고 NODE가 `<none>`이다: 4번 스케줄러가 자리를 못 찾았다. `kubectl describe pod`의 Events에서 FailedScheduling 이유를 본다.
-- ContainerCreating이나 ImagePullBackOff다: 노드는 정해졌고 6번 kubelet과 런타임 쪽이다. 이미지 이름, 레지스트리 인증, 볼륨 연결을 본다.
-
-## API 서버와 etcd
-
-모든 구성 요소가 API 서버를 거치고, API 서버는 상태를 etcd에 둔다. 클러스터가 기억하는 것은 etcd 한곳에 있다.
-
-### API 서버 요청 처리
-
-`kubectl get pod`는 kubectl이 무언가를 계산하는 명령처럼 보이지만 실제로는 HTTP GET 한 번이다. kubectl 코드(v1.33)를 디버거로 따라가면 이렇게 흘러간다.
-
-1. `~/.kube/config`(또는 `KUBECONFIG`)를 읽어 API 서버 주소와 인증 정보를 정한다.
-2. 명령줄을 명령 트리(cobra)에서 찾아 `get`의 실행 함수를 부른다.
-3. 아래 요청을 보낸다. 로그에 찍힐 때 토큰은 가려진다.
-
-```text
-GET https://<API 서버>/api/v1/namespaces/default/pods?limit=500
-Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json
-Authorization: Bearer <토큰>
-```
-
-- `limit=500`: 목록을 500개씩 나눠 받는다. `--chunk-size`의 기본값이다.
-- `as=Table`: NAME, READY, STATUS 같은 열을 서버가 만들어 보낸다. 출력 열은 kubectl이 아니라 API 서버가 정한다.
-
-API 서버는 요청을 받으면 정해진 순서로 검사한다.
-
-- 인증(authentication): 누구인지 확인한다. 실패하면 401이다.
-- 인가(authorization): 그 사용자가 이 동작을 해도 되는지 RBAC 규칙 등으로 확인한다. 실패하면 403이다.
-- 어드미션(admission): 만들기, 고치기, 지우기 요청만 거친다. 기본값을 채우거나 정책에 어긋나는 요청을 막는다.
-- 검증과 저장: 객체 형식을 검사하고 etcd에 쓴다.
-
-세 장면에서 요청이 어느 칸을 지나고, 어디서 멈추거나 건너뛰는지 본다.
+- 인증(authentication): 인증서나 토큰으로 누구인지 확인한다. 실패하면 401이다.
+- 인가(authorization): 그 사용자가 이 동작을 해도 되는지 RBAC(역할 기반 접근 제어, 역할마다 허용할 동작을 적은 규칙)으로 확인한다. 실패하면 403이다.
+- 어드미션(admission): 만들기, 고치기, 지우기 요청만 거친다. 변경(mutating) 단계가 기본값을 채우고, 검증(validating) 단계가 정책에 어긋난 요청을 막는다.
+- 저장: 스키마를 검사한 뒤 etcd의 `/registry/<리소스>/<네임스페이스>/<이름>` 키에 쓴다. 접두사 `/registry`는 `--etcd-prefix`의 기본값이다.
 
 <figure class="fig" data-figure="k8s-architecture-api">
   <figcaption>API 서버가 요청을 검사하는 순서</figcaption>
 </figure>
 
-읽기는 어드미션을 건너뛰고, 목록 조회는 etcd까지 가지 않을 때가 많다. API 서버는 etcd 내용을 메모리의 감시 캐시(watch cache)에 들고 있다가, 캐시가 최신인지 etcd에 확인한 뒤 캐시에서 답한다. 1.31부터 기본으로 켜진 동작이다.
-
-권한 문제는 요청을 보내기 전에 `kubectl auth can-i`로 확인한다.
+`kubectl get pods`도 이 순서를 지나는 HTTP 요청 한 번이다. kubectl은 kubeconfig에서 주소와 인증 정보를 읽어 아래 요청을 보내고, NAME, READY, STATUS 같은 출력 열은 API 서버가 표로 만들어 보낸다.
 
 ```text
-$ kubectl auth can-i delete pods -n prod
-no
+GET /api/v1/namespaces/default/pods?limit=500
+Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json
 ```
 
-401이 뜨면 kubeconfig의 인증 정보를, 403이 뜨면 그 사용자의 RBAC 규칙을 먼저 본다.
+`limit=500`은 목록을 500개씩 나눠 받는 `--chunk-size`의 기본값이다. 읽기는 어드미션을 건너뛰고, 1.31부터는 목록을 etcd까지 가지 않고 API 서버 메모리의 감시 캐시(watch cache)에서 답한다. 캐시가 최신인지만 etcd에 확인한다.
 
-### etcd 쿼럼
+etcd에 저장된 객체에는 `resourceVersion`이 붙는다. etcd가 쓰기마다 하나씩 올리는 리비전 번호다. 두 클라이언트가 같은 객체를 동시에 고치면 먼저 쓴 쪽만 성공하고, 낡은 resourceVersion을 들고 온 쪽은 409 Conflict를 받아 다시 읽고 고친다. 잠금 없이 충돌을 막는 이 방식을 낙관적 동시성(optimistic concurrency)이라고 한다.
 
-컨트롤 플레인을 3대에서 4대로 늘렸는데, 2대가 죽자 클러스터가 멈췄다. etcd는 멤버의 과반이 살아 있어야 쓰기를 받는다.
+API 서버와 etcd가 멈춰도 이미 돌던 컨테이너는 그대로 돈다. 새로 띄우거나 고치는 일만 전부 멈춘다. 상태를 한곳에 모은 대가로 그 한곳은 멈추면 안 된다.
 
-etcd는 Raft 합의로 움직인다. 쓰기 하나는 리더가 받아 다른 멤버에게 복제하고, 과반(쿼럼, quorum)이 받았다고 답해야 확정된다.
+## etcd 쿼럼
+
+etcd는 여러 대로 복제하되 Raft 합의로 한 목소리를 낸다. 멤버 중 하나가 리더가 되어 쓰기를 받고, 다른 멤버에게 복제해 과반(쿼럼, quorum)이 받았다고 답해야 그 쓰기를 확정한다. 리더는 기본 100ms마다 하트비트를 보내고, 다른 멤버는 1000ms(선거 타임아웃) 동안 소식이 없으면 새 리더를 뽑는다.
 
 ```text
 과반 = 멤버 수 ÷ 2의 몫 + 1
@@ -122,66 +57,71 @@ etcd는 Raft 합의로 움직인다. 쓰기 하나는 리더가 받아 다른 �
 5대 → 과반 3 → 2대 고장까지 견딤
 ```
 
-아래 데모에서 멤버 수를 고르고 한 대씩 꺼 보자. 모드를 바꿔 가며 몇 번째 고장에서 쓰기가 멈추는지 본다.
+아래 데모에서 멤버 수를 고르고 한 대씩 꺼서, 3대와 4대가 몇 번째 고장에서 쓰기를 멈추는지 비교한다.
 
 <figure class="fig" data-figure="k8s-architecture-etcd">
   <figcaption>etcd 멤버가 하나씩 죽을 때 쓰기가 멈추는 시점</figcaption>
 </figure>
 
-3대는 1대가 죽어도 2대가 과반이라 쓰기가 이어지고, 2대가 죽으면 멈춘다. 4대는 과반이 3으로 올라서 2대가 죽으면 똑같이 멈춘다. 장비만 한 대 늘고 **견디는 고장 수는 그대로**다.
+3대는 1대가 죽어도 남은 2대가 과반이라 쓰기가 이어지고, 두 번째 고장에서 멈춘다. 4대는 과반이 3으로 오르면서 똑같이 두 번째 고장에서 멈춘다. 장비만 한 대 늘고 **견디는 고장 수는 그대로**라서 etcd 문서는 홀수를 권한다. 네트워크가 둘로 갈라질 때도 홀수면 한쪽이 반드시 과반을 갖는다.
 
-그래서 etcd는 3, 5처럼 홀수로 둔다. 네트워크가 둘로 갈라질 때도 홀수면 한쪽이 반드시 과반을 갖는다. 멤버가 늘면 쓰기마다 복제할 곳도 늘어나서, etcd 문서는 7대를 넘기지 말라고 권한다. 대부분은 2대 고장을 견디는 5대면 충분하다.
+- 멤버가 늘면 쓰기마다 복제할 곳이 늘어 느려진다. etcd 문서는 7대를 넘기지 말라고 하고, 대부분은 2대 고장을 견디는 5대면 된다.
+- 저장 용량에는 기본 2GB 쿼터가 걸려 있다. 넘으면 NOSPACE 경보가 켜지고 읽기와 지우기만 받는다. 권장 상한은 8GB다.
+
+etcd는 고칠 때마다 이전 리비전을 남긴다. 이 기록이 끝없이 쌓이지 않게 API 서버는 5분마다(`--etcd-compaction-interval` 기본값) etcd에 압축(compaction)을 요청해, 직전 요청 때의 리비전보다 오래된 것을 지운다. 그래서 etcd에 남는 변경 기록은 5~10분 길이다.
+
+## 감시와 조정 루프
+
+스케줄러, 컨트롤러, kubelet은 API 서버에 감시(watch)를 걸어 둔다. 감시는 `?watch=1&resourceVersion=10245`처럼 마지막으로 본 버전을 붙인 GET 요청이다. API 서버는 연결을 끊지 않고 그 뒤에 일어난 변경을 ADDED, MODIFIED, DELETED 이벤트로 흘려보내서, 매번 목록을 다시 받는 폴링보다 훨씬 가볍다.
+
+클라이언트 라이브러리(client-go)의 인포머(informer)가 이 감시를 감싼다.
+
+1. list: 목록을 한 번 받아 메모리 캐시를 채우고 그 resourceVersion을 기억한다.
+2. watch: 그 버전부터 감시하며 캐시를 고친다.
+3. 다시 list: 요청한 버전의 기록이 이미 없으면 API 서버가 410 Gone을 돌려준다. 캐시를 비우고 1번부터 다시 한다.
+
+감시는 etcd가 아니라 API 서버의 감시 캐시에서 받는다. 이 캐시는 종류마다 정해진 크기(`--watch-cache-sizes`)의 버퍼에 최근 이벤트만 담아서, 변경이 잦으면 etcd에 남은 기록보다 먼저 옛 이벤트가 밀려나고 410 Gone이 온다. 공식 문서는 기록 창이 짧은 데 대비해 `allowWatchBookmarks=true`로 BOOKMARK 이벤트를 받아 resourceVersion을 앞당겨 두라고 한다.
+
+컨트롤러는 인포머의 캐시를 읽고 판단해서 API 서버에 매번 묻지 않는다. 컨트롤러 매니저(kube-controller-manager)는 Deployment, ReplicaSet, Node, Job 같은 여러 컨트롤러를 한 프로세스에 묶어 돌린다.
+
+컨트롤러 하나는 원하는 상태(spec)와 실제 상태를 견주고, 다르면 실제를 원하는 쪽으로 옮기는 일을 반복한다. 이 반복을 조정 루프(reconcile loop)라고 한다. Deployment 컨트롤러는 ReplicaSet을 만들고, ReplicaSet 컨트롤러는 replicas 수에 맞게 파드를 만들거나 지운다. 아래 그림처럼 파드 하나를 지우면 지키는 컨트롤러가 없는 파드는 2개로 남고, Deployment의 파드는 새 이름으로 다시 3개가 된다.
+
+<figure class="fig" data-figure="k8s-architecture-reconcile">
+  <figcaption>파드 하나를 지웠을 때</figcaption>
+</figure>
+
+컨트롤러는 "파드가 지워졌다"는 이벤트 하나에 반응하지 않는다. 볼 때마다 "원하는 3, 실제 2" 같은 차이를 메울 뿐이라, 이벤트를 놓쳐도 다음 비교에서 따라잡고 같은 일을 두 번 해도 결과가 같다. 공식 문서가 파드 하나만 띄울 때조차 Deployment나 Job으로 만들라고 권하는 이유다.
+
+컨트롤러 매니저를 여러 대 띄워도 루프를 도는 것은 한 대다. 둘이 함께 돌면 같은 차이를 두 번 메워 파드가 넘칠 수 있다. 인스턴스마다 `kube-system`의 Lease 객체를 잡으려 하고, 리더가 10초 안에 갱신하지 못하면 15초 뒤 다른 인스턴스가 이어받는다. 스케줄러도 같다.
+
+```text
+--leader-elect-renew-deadline=10s   리더가 갱신을 포기하는 시한
+--leader-elect-lease-duration=15s   다른 인스턴스가 기다리는 시간
+```
+
+롤링 업데이트도 이 루프로 돈다. 이미지를 바꾸면 Deployment 컨트롤러가 새 ReplicaSet을 만들고, 기본값 maxSurge 25%와 maxUnavailable 25%를 넘지 않게 새 쪽의 replicas를 늘리고 옛 쪽을 줄인다. replicas 4면 최대 5개까지 띄우고 최소 3개를 유지한다.
 
 ## 스케줄링
 
-API 서버에 막 저장된 파드는 노드 칸이 비어 있다. 이 빈칸을 채우는 것이 스케줄러(kube-scheduler)다. 기본 스케줄러 대신 직접 만든 스케줄러를 쓸 수도 있게 설계되어 있다.
+컨트롤러가 만든 파드는 `spec.nodeName`이 비어 있다. 스케줄러(kube-scheduler)는 이런 파드를 감시해 스케줄링 큐에 넣고, 하나씩 꺼내 세 단계로 노드를 고른다.
 
-### 거르기와 점수
-
-노드가 넷인데 새 파드가 늘 같은 노드에만 몰린다. 스케줄러는 노드를 무작위로 고르지 않고 두 단계로 고른다.
-
-- 거르기(filtering): 이 파드를 올릴 수 없는 노드를 뺀다. 남은 노드를 feasible 노드라고 한다.
-- 점수(scoring): 남은 노드에 점수를 매기고 가장 높은 노드를 고른다.
-
-고른 결과는 바인딩으로 API 서버에 적는다. 스케줄러는 컨테이너를 띄우지 않고, 파드의 `nodeName` 칸을 채우는 데서 일이 끝난다.
-
-세 장면에서 노드가 어떤 이유로 빠지고, 남은 노드 중 어디가 뽑히는지 본다.
+- 거르기(filtering): 올릴 수 없는 노드를 뺀다. request만큼 자리가 남았는지(NodeResourcesFit), 노드에 붙은 taint(아무 파드나 올리지 말라는 표시)를 파드가 toleration(그 표시를 견딘다는 선언)으로 견디는지(TaintToleration), nodeSelector와 어피니티에 맞는지(NodeAffinity)를 본다.
+- 점수(scoring): 남은 노드마다 플러그인이 0~100점을 매기고, 가중치를 곱해 더한 점수가 가장 높은 노드를 고른다. 기본값은 덜 할당된 노드(LeastAllocated)와 이미지를 이미 받아 둔 노드(ImageLocality)를 우대한다.
+- 바인딩(binding): 고른 노드 이름을 파드의 `nodeName`에 적는다. 스케줄러는 컨테이너를 띄우지 않는다.
 
 <figure class="fig" data-figure="k8s-architecture-filter">
   <figcaption>거르기, 점수, 바인딩 순서로 노드를 고르는 과정</figcaption>
 </figure>
 
-거르기와 점수의 규칙은 스케줄러에 박혀 있지 않고 플러그인으로 들어 있다. 기본으로 켜진 것 중 자주 만나는 것은 이렇다.
+노드가 수천 대면 스케줄러는 조건에 맞는 노드를 일정 비율만큼 찾으면 거르기를 멈추고 그 안에서 점수를 매긴다. 이 비율(`percentageOfNodesToScore`)은 따로 정하지 않으면 100대에서 50%, 5000대에서 10%로 줄고 5% 아래로는 내려가지 않는다. 조건에 맞는 노드가 100대가 안 되면 전부 본다.
 
-| 플러그인 | 거르기 | 점수 |
-|---|---|---|
-| NodeResourcesFit | 요청한 CPU, 메모리가 남았는지 | 덜 할당된 노드 우대 (LeastAllocated, 기본값) |
-| NodeResourcesBalancedAllocation | | CPU와 메모리가 고르게 남는 노드 우대 |
-| TaintToleration | 노드의 taint를 파드가 견디는지 | 견디지 못하는 PreferNoSchedule taint가 적은 노드 우대 |
-| NodeAffinity | nodeSelector, 필수 어피니티에 맞는지 | 선호 어피니티에 맞는 노드 우대 |
-| PodTopologySpread | 퍼짐 제약을 어기지 않는지 | 존과 노드에 고루 퍼지게 |
-| ImageLocality | | 이미지를 이미 받아 둔 노드 우대 |
-| NodePorts, VolumeBinding, VolumeZone | 포트, 볼륨 조건이 맞는지 | |
-
-플러그인 하나가 두 단계에 다 들어가기도 한다. NodeResourcesFit은 자리가 있는지 거르는 데도, 얼마나 여유로운지 점수를 매기는 데도 쓰인다.
-
-파드가 한 노드에 몰린다면 그 노드의 request 여유가 유난히 크지 않은지, 이미지를 그 노드만 갖고 있지 않은지부터 본다. 고루 퍼뜨려야 하는 서비스는 PodTopologySpread 제약을 직접 건다.
-
-### Pending 파드
-
-클러스터 CPU 사용률은 30%인데 새 파드가 Pending에서 움직이지 않는다. 스케줄러가 재는 것은 실제 사용량이 아니라 **request 합계**다.
-
-노드에 남은 자리는 노드의 할당 가능량(allocatable)에서 이미 올라간 파드들의 request 합을 뺀 값이다. 파드가 실제로 CPU를 얼마나 쓰는지는 거르기에 들어가지 않는다.
-
-데모에서 request를 바꿔 가며 파드를 만들어 보자. 회색 막대(request 합)와 주황 점선(실사용)을 견주며 파드가 어디로 가는지 본다.
+거르기에서 재는 자리는 실제 사용량이 아니라 **request 합계**다. 노드의 남은 자리는 할당 가능량(allocatable)에서 이미 올라간 파드들의 request 합을 뺀 값이다. 아래 데모에서 새 파드의 request를 500m(밀리코어, 0.5코어)과 2000m(2코어)으로 바꿔 가며 파드 만들기를 눌러 결과를 비교한다.
 
 <figure class="fig" data-figure="k8s-architecture-pending">
   <figcaption>request 합계로 자리를 재는 스케줄러 (노드마다 CPU 4개)</figcaption>
 </figure>
 
-500m은 여유가 1.5코어인 node-2에 바로 들어가고, 2000m은 어느 노드에도 들어가지 못한다. 세 노드 모두 실사용은 절반도 안 되지만 request로는 거의 차 있다. 두 모드에서 바뀐 것은 새 파드의 request 하나뿐이다.
-
-Pending 파드는 Events에 이유가 남는다.
+500m은 여유가 1.5코어인 node-2에 들어가고, 2000m은 세 노드의 실사용이 모두 절반도 안 되는데 들어갈 곳이 없다. 스케줄러는 실사용이 아니라 request의 합으로 자리를 재기 때문이다. 이유는 Events에 남는다.
 
 ```text
 $ kubectl describe pod api-7d4b9c-x2k9
@@ -191,164 +131,47 @@ Events:
   Warning  FailedScheduling  default-scheduler  0/3 nodes are available: 3 Insufficient cpu.
 ```
 
-거르기에서 하나도 남지 않으면 스케줄러는 선점(preemption)을 시도한다. 우선순위(PriorityClass)가 낮은 파드를 내보내면 자리가 나는지 본다. 그래도 자리가 없으면 파드는 대기하고, 클러스터 오토스케일러가 있으면 이 Pending 파드를 보고 노드를 늘린다.
+남는 노드가 없으면 우선순위가 낮은 파드를 내보내는 선점(preemption)을 시도하고, 그래도 없으면 파드는 Pending으로 대기한다. Pending이 잦으면 노드를 늘리기 전에 request가 실사용보다 크게 잡혀 있지 않은지 본다. 기준은 [CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %})에 정리했다.
 
-Pending이 잦다면 노드를 늘리기 전에 request가 실사용보다 크게 잡혀 있지 않은지부터 본다. request를 정하는 기준은 [CPU 이해하기]({{ site.baseurl }}{% post_url 2026-10-25-k8s-cpu-request-limit %})에 정리했다.
+파드 수백 개를 한꺼번에 만들어도 두 파드가 같은 마지막 자리를 차지하지 않는다. 노드를 고르는 스케줄링 주기는 파드 하나씩 차례로 돌고, 고른 자리는 바인딩 전에 스케줄러 메모리에서 먼저 잡아 둔다(Reserve). API 서버에 적는 바인딩 주기만 여러 파드가 겹쳐 돌아서, 볼륨 준비처럼 오래 걸리는 반영이 다음 파드의 고르기를 막지 않는다.
 
-### 스케줄링 주기
+## kubelet과 컨테이너 런타임
 
-파드 수백 개를 한꺼번에 만들어도 두 파드가 같은 마지막 자리를 함께 차지하지 않는다. 스케줄러는 파드 하나를 다루는 시도를 두 주기로 나눠 돌린다.
+노드마다 도는 kubelet은 모든 파드가 아니라 `spec.nodeName`이 자기 노드인 파드만 감시한다. kubelet 소스에서 이 감시는 필드 셀렉터 `spec.nodeName=<노드 이름>`을 붙인 list와 watch다. 스케줄러가 바인딩을 적는 순간 그 노드의 kubelet에 파드가 도착한다.
 
-- 스케줄링 주기: 노드를 고른다. 한 번에 파드 하나씩 차례로 돈다.
-- 바인딩 주기: 고른 결과를 API 서버에 반영한다. 여러 파드가 겹쳐서 돈다.
+kubelet은 컨테이너를 직접 만들지 않고 CRI(Container Runtime Interface)로 containerd 같은 런타임에 시킨다. CRI는 kubelet과 런타임 사이의 gRPC 규약이고, 파드 하나를 띄울 때 이 순서로 부른다.
 
-그림에서 위 줄의 블록은 겹치지 않고, 아래 줄의 블록은 겹치는 것을 본다.
+1. `RunPodSandbox`: 파드의 껍데기(샌드박스)를 만든다. 런타임이 작은 pause 컨테이너로 네트워크 네임스페이스를 잡고, CNI(Container Network Interface) 플러그인이 여기에 파드 IP를 붙인다. CNI 플러그인은 Calico, Cilium처럼 파드 네트워크를 만드는 프로그램이다.
+2. `PullImage`: 이미지가 노드에 없으면 받는다.
+3. `CreateContainer`, `StartContainer`: 컨테이너마다 만들어 샌드박스 안에서 시작한다.
 
-<figure class="fig" data-figure="k8s-architecture-cycles">
-  <figcaption>스케줄링 주기와 바인딩 주기의 시간축</figcaption>
-</figure>
+STATUS가 ContainerCreating인 동안이 이 세 단계다. 이미지를 받지 못하면 ErrImagePull을 거쳐 ImagePullBackOff가 되고, 파드는 노드가 정해진 채로 멈춰 있다.
 
-고르는 도중에 다른 파드가 끼어들면 둘이 같은 자리를 고를 수 있다. 그래서 고르기는 하나씩 하고, 고른 자리는 바인딩이 끝나기 전에 스케줄러 안에서 미리 잡아 둔다(Reserve). 볼륨이 준비되기를 기다리는 것처럼 오래 걸리는 반영은 겹쳐 돌려서 다음 파드의 고르기를 막지 않는다.
-
-대량 배포 때 파드가 Pending에 오래 머물다 한꺼번에 뜬다면, 고르기보다 바인딩 쪽의 볼륨 준비가 오래 걸리지 않는지 본다.
-
-## 워크로드
-
-파드는 하나하나 손으로 만들지 않는다. 몇 개를 어떻게 유지할지 적은 워크로드 리소스를 만들고, 컨트롤러가 그 내용대로 파드를 만든다.
-
-### 파드
-
-컨테이너는 쿠버네티스에 그대로 올라가지 않는다. 파드(Pod)로 한 겹 싸서 올리고, 파드가 쿠버네티스가 만들고 다루는 가장 작은 단위다.
-
-파드 하나에는 컨테이너가 여럿 들어갈 수 있다. 같은 파드의 컨테이너는 같은 노드에서 함께 뜨고, 두 가지를 나눠 쓴다.
-
-- 네트워크: IP 하나를 같이 쓴다. 서로를 `localhost`로 부르고, 포트로 구별한다.
-- 볼륨: 같은 볼륨을 함께 마운트한다.
-
-두 장면에서 요청과 로그가 파드 안 어디를 지나는지 본다.
+같은 파드의 컨테이너가 IP 하나를 나눠 쓰는 것은 모두 한 샌드박스의 네트워크 네임스페이스에 들어가기 때문이다. 아래 그림처럼 서로를 `localhost`로 부르고 포트로 구별하며, 볼륨도 함께 마운트한다.
 
 <figure class="fig" data-figure="k8s-architecture-pod">
   <figcaption>컨테이너 둘이 IP와 볼륨을 나눠 쓰는 파드</figcaption>
 </figure>
 
-로그 수집기나 프록시 같은 보조 컨테이너(사이드카)를 앱과 같은 파드에 붙이는 이유가 이것이다. 반대로 따로 늘리고 줄여야 하는 것(웹 서버와 DB)은 한 파드에 넣지 않는다. 늘리고 줄이는 단위가 파드라서, 한 파드에 넣으면 둘을 같은 수로만 늘릴 수 있다.
-
-### 조정 루프
-
-테스트하려고 `kubectl run`으로 띄운 파드는 실수로 지우거나 노드가 빠지면 그대로 사라진다. Deployment로 띄운 파드는 곧 다시 생긴다. 차이는 그 파드를 지켜보는 컨트롤러가 있느냐다.
-
-컨트롤러는 원하는 상태(spec)와 실제 상태를 견주고, 다르면 실제를 원하는 쪽으로 옮기는 일을 계속 반복한다. 이 반복을 조정 루프(reconcile loop)라고 한다.
-
-1. 감시: API 서버에서 자기가 맡은 객체의 변화를 받는다.
-2. 비교: replicas는 3인데 파드는 2개다.
-3. 조치: 파드 하나를 만들어 API 서버에 적는다.
-
-데모에서 파드 하나를 지워 보자. 모드를 바꿔 가며 지운 뒤 파드 수가 어떻게 되는지 본다.
-
-<figure class="fig" data-figure="k8s-architecture-reconcile">
-  <figcaption>파드 하나를 지웠을 때</figcaption>
-</figure>
-
-직접 만든 파드는 지우면 2개로 남고, Deployment의 파드는 지워도 새 이름의 파드가 떠서 3개가 된다. 지운 동작은 같고 차이를 메우는 컨트롤러가 있느냐만 다르다. 그래서 공식 문서도 파드 하나만 띄울 때조차 Deployment나 Job으로 만들라고 권한다.
-
-컨트롤러는 "파드를 만들어라"라는 명령을 받아 움직이지 않는다. 볼 때마다 원하는 상태로 맞추기만 해서, 중간에 이벤트를 놓쳐도 다음 비교에서 따라잡는다.
-
-파드를 `kubectl edit`로 직접 고치면 다음 교체 때 사라진다. 바꿀 것은 파드가 아니라 그 위의 Deployment에 적는다.
-
-### Deployment 롤링 업데이트
-
-Deployment는 개수만 맞으면 되는, 서로 구별되지 않는 파드를 다룬다. Deployment가 ReplicaSet을 만들고 ReplicaSet이 파드를 만든다. 이미지를 바꾸면 새 ReplicaSet을 만들어 새 파드를 조금씩 늘리고 옛 파드를 줄인다.
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: api
-spec:
-  replicas: 4
-  selector:
-    matchLabels:
-      app: api
-  strategy:
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
-  template:
-    metadata:
-      labels:
-        app: api           # selector와 같아야 한다
-    spec:
-      containers:
-      - name: api
-        image: registry.example.com/api:1.4.2
-        resources:
-          requests: { cpu: 500m, memory: 512Mi }
-```
-
-`selector`와 template의 레이블이 다르면 API 서버가 Deployment를 받지 않는다. selector는 만든 뒤에 바꿀 수 없어서, 바꾸려면 Deployment를 새로 만든다.
-
-교체 폭은 두 값으로 정한다. 기본값은 둘 다 25%이고, replicas 4면 이렇게 계산된다.
+kubelet은 컨테이너 상태를 파드의 status에 적고, 노드가 살아 있다는 것은 10초마다 `kube-node-lease` 네임스페이스의 Lease 객체를 갱신해 알린다. 노드가 끊기면 기본값으로 이렇게 흘러간다.
 
 ```text
-maxSurge 25%        → 4 × 0.25 = 1 (올림)  →  최대 5개까지 띄운다
-maxUnavailable 25%  → 4 × 0.25 = 1 (내림)  →  최소 3개는 사용 가능하게 둔다
+0초     마지막 Lease 갱신
+50초    node-monitor-grace-period 경과 → Ready=Unknown, unreachable taint
+350초   파드의 기본 toleration 300초 만료 → 축출, 컨트롤러가 다른 노드에 새로 만든다
 ```
 
-두 장면에서 아래 그래프의 사용 가능한 파드 수가 어디까지 내려가는지 본다.
-
-<figure class="fig" data-figure="k8s-architecture-rolling">
-  <figcaption>replicas 4에서 v1을 v2로 바꾸는 롤링 업데이트</figcaption>
-</figure>
-
-기본값은 빨리 끝나지만 교체 중에 4분의 1이 빠진다. 평소 트래픽을 파드 3개로 버티기 빠듯하면 그 순간 응답이 느려진다. 그런 서비스는 maxUnavailable을 0으로 두고 maxSurge만큼 먼저 띄운다.
-
-- maxUnavailable 0이면 노드에 파드 하나가 더 들어갈 request 여유가 있어야 한다. 여유가 없으면 새 파드가 Pending에 걸려 업데이트가 멈춘다.
-- 새 파드가 준비됐는지는 readinessProbe로 판단한다. probe가 없으면 프로세스가 뜨자마자 준비된 것으로 보고 옛 파드를 내린다.
-
-### StatefulSet
-
-DB 복제본을 Deployment로 띄웠더니, 파드가 다시 뜰 때마다 이름이 바뀌고 데이터가 사라졌다. 몇 번째인지가 중요한 파드는 StatefulSet으로 띄운다.
-
-StatefulSet의 파드 이름은 `<StatefulSet 이름>-<번호>`로 고정된다. `volumeClaimTemplates`를 주면 번호마다 PVC가 따로 생기고, 파드가 다시 떠도 같은 번호의 PVC가 다시 붙는다.
-
-- 이름: db-0, db-1, db-2. 다시 떠도 같은 이름이다.
-- 순서: 기본 설정이면 0번부터 하나씩 띄우고, 줄일 때는 큰 번호부터 내린다.
-- 볼륨: data-db-0, data-db-1처럼 번호마다 따로 붙고, 파드나 StatefulSet을 지워도 PVC는 남는다.
-
-두 장면에서 가운데 파드를 지웠을 때 새로 뜬 파드의 이름과 데이터를 본다.
-
-<figure class="fig" data-figure="k8s-architecture-statefulset">
-  <figcaption>가운데 파드를 지웠을 때 Deployment와 StatefulSet</figcaption>
-</figure>
-
-Deployment는 새 이름으로 빈 파드를 띄우고, StatefulSet은 db-1을 같은 이름으로 다시 띄워 data-db-1을 붙인다. 이름이 고정되니 db-0을 primary로 두는 식의 설정을 할 수 있다. 헤드리스 서비스와 함께 쓰면 파드마다 `db-0.db.default.svc.cluster.local` 같은 고정 DNS 이름도 생긴다.
-
-StatefulSet은 이름과 볼륨만 지켜 준다. 복제 설정과 장애 조치는 하지 않아서, 그 일은 DB 자신이나 뒤에 나올 Operator가 맡는다.
-
-### DaemonSet
-
-노드마다 로그 수집기를 하나씩 둬야 하는데, replicas로 띄우면 노드가 늘 때마다 숫자를 고쳐야 한다. DaemonSet은 개수 대신 "노드마다 하나"를 지킨다.
-
-노드가 클러스터에 들어오면 그 노드에 파드가 생기고, 노드가 빠지면 그 파드도 정리된다. nodeSelector나 어피니티로 일부 노드에만 띄울 수도 있다.
-
-두 장면에서 노드가 들어오고 빠질 때 파드 수가 노드 수를 따라가는지 본다.
-
-<figure class="fig" data-figure="k8s-architecture-daemonset">
-  <figcaption>노드 수를 따라가는 DaemonSet 파드</figcaption>
-</figure>
-
-로그 수집기, 노드 모니터링(node-exporter), 네트워크 플러그인처럼 노드 자체를 다루는 것을 DaemonSet으로 띄운다. 컨트롤 플레인 노드에도 띄워야 하면 그 노드의 taint를 견디는 toleration을 넣는다.
+노드가 죽어도 파드가 바로 옮겨 가지 않는 이유가 이 기다림이다. 잠깐 끊긴 네트워크 때문에 파드를 모두 옮기는 일은 막지만, 진짜 장애에서는 6분 가까이 그 파드 몫이 빈다. 빨리 옮겨야 하는 서비스는 파드의 `tolerationSeconds`를 짧게 준다.
 
 ## Operator와 CRD
 
-Prometheus를 클러스터에 직접 올리면 StatefulSet, 서비스, 설정 파일, 스크랩 대상 관리까지 사람이 챙겨야 한다. Operator는 이런 운영 지식을 컨트롤러로 만들어, 앞의 조정 루프를 내가 정한 리소스에도 돌린다.
+기본 컨트롤러는 파드 수, 노드 배치처럼 쿠버네티스가 아는 종류만 맞춘다. DB의 primary가 죽었을 때 replica 하나를 승격하고 나머지가 새 primary를 따르게 하는 일은 DB마다 순서가 달라서, 어느 기본 컨트롤러도 하지 않는다. 그 운영 지식을 조정 루프로 만든 것이 오퍼레이터(Operator)다.
 
-재료는 두 가지다.
+- CRD(CustomResourceDefinition): 새 종류(kind)의 이름과 스키마. 등록하면 API 서버가 그 종류의 경로를 열고 객체를 기본 리소스처럼 etcd에 저장한다.
+- CR(custom resource): 그 종류의 객체. 사용자가 원하는 상태를 적는다.
+- 오퍼레이터: CR을 감시하며 실제 리소스를 CR에 맞추는 커스텀 컨트롤러.
 
-- CRD(CustomResourceDefinition): API 서버에 새 종류(kind)를 등록한다. 등록하면 `kubectl get prometheuses`처럼 기본 리소스와 똑같이 다룬다.
-- 커스텀 컨트롤러(오퍼레이터): 그 종류의 객체인 CR(custom resource)을 감시하고, 적힌 대로 StatefulSet, 서비스, 설정을 만든다.
-
-Prometheus Operator를 설치하면 CRD가 함께 등록되고, 사용자는 CR만 적는다.
+Prometheus Operator는 `Prometheus`라는 종류를 등록하고, 사용자는 아래 CR만 적는다. 오퍼레이터가 이를 보고 replicas 2인 StatefulSet과 설정을 만든다.
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -362,56 +185,46 @@ spec:
       team: api
 ```
 
-세 장면에서 CRD 등록, CR 생성, 직접 수정이 각각 무엇을 바꾸는지 본다. 세 번째 장면에서 누군가 줄인 파드 수가 어디로 돌아가는지 지켜보자.
+아래 그림처럼 누군가 그 StatefulSet을 직접 1로 줄여도 다음 조정에서 CR대로 2로 돌아간다. 오퍼레이터가 원하는 상태로 삼는 것은 리소스가 아니라 CR이라서, 바꿀 것은 CR에 적는다.
 
 <figure class="fig" data-figure="k8s-architecture-operator">
   <figcaption>CRD, CR, 오퍼레이터가 맞물려 도는 모습</figcaption>
 </figure>
 
-오퍼레이터가 만든 리소스를 직접 고쳐도 다음 조정에서 CR 내용으로 돌아간다. 바꿀 것은 CR에 적는다. CR을 고치면 오퍼레이터가 리소스를 그에 맞게 바꾸므로, CR을 지우고 다시 만들 필요는 없다.
-
-Prometheus Operator에서는 스크랩 대상도 CR(ServiceMonitor)이다. `serviceMonitorSelector`에 맞는 ServiceMonitor를 추가하면 오퍼레이터가 스크랩 설정을 다시 만들어 Prometheus에 반영한다.
-
-오퍼레이터는 Operator SDK나 Kubebuilder로 만든다. Helm 차트를 감싸는 방식도 있어서, CR의 spec이 차트의 values로 들어간다.
-
-```text
-operator-sdk init --plugins helm --domain example.com --helm-chart <차트>
-```
-
-오퍼레이터를 들일 때는 RBAC 권한 범위와 CR을 지울 때의 동작(finalizer)부터 본다. 오퍼레이터는 사람 대신 클러스터에 리소스를 만드는 프로그램이라, 권한을 `'*'`로 넓게 주면 그만큼 위험하다.
-
 ## 정리
 
-| | 하는 일 | 기억할 점 |
-|---|---|---|
-| API 서버 | 모든 읽기와 쓰기의 정문 | 인증 실패 401, 인가 실패 403. 어드미션은 쓰기만 거친다 |
-| etcd | 클러스터 상태 저장 | 과반이 살아야 쓴다. 3, 5처럼 홀수로 둔다 |
-| 스케줄러 | 거르기, 점수, 바인딩 | request 합으로 잰다. 실사용이 아니다 |
-| kubelet | 배정된 파드를 런타임으로 띄운다 | ContainerCreating부터는 노드 쪽 문제다 |
-| 컨트롤러 | 원하는 상태와 실제를 맞춘다 | 파드는 직접 만들지 않는다 |
-| Deployment | 구별 없는 파드 개수 유지, 롤링 업데이트 | 기본 25%씩 교체. 끊기면 안 되면 maxUnavailable 0 |
-| StatefulSet | 번호로 고정된 이름과 볼륨 | 복제와 장애 조치는 따로 챙긴다 |
-| DaemonSet | 노드마다 하나 | 노드 수를 따라간다 |
-| Operator | CRD와 커스텀 컨트롤러 | 바꿀 것은 CR에 적는다 |
+- API 서버는 모든 요청을 인증, 인가, 어드미션 순으로 검사하고 상태를 etcd 한곳에 적는다. 구성 요소는 서로 부르지 않고 이 기록을 본다.
+- etcd는 과반이 살아야 쓰기를 받는다. 4대는 3대처럼 1대 고장만 견디므로 3, 5처럼 홀수로 둔다.
+- 컨트롤러는 list와 watch로 바뀐 것을 받고, 원하는 상태와 실제를 볼 때마다 맞춘다. 이벤트를 놓쳐도 다음 비교에서 따라잡는다.
+- 스케줄러는 노드가 빈 파드에 거르기, 점수, 바인딩으로 노드를 적는다. 자리는 실사용이 아니라 request 합으로 잰다.
+- kubelet은 자기 노드에 적힌 파드를 CRI로 샌드박스, 이미지, 컨테이너 순으로 띄운다. 노드가 끊기면 기본값으로 6분 가까이 지나야 파드가 옮겨 간다.
+- 오퍼레이터는 기본 컨트롤러가 모르는 운영 지식을 CRD로 만든 새 종류의 조정 루프로 돌린다. 바꿀 것은 CR에 적는다.
 
 ## 참고
 
 - [Kubernetes — Kubernetes Components](https://kubernetes.io/docs/concepts/overview/components/)
 - [Kubernetes — Controlling Access to the Kubernetes API](https://kubernetes.io/docs/concepts/security/controlling-access/)
+- [Kubernetes — kube-apiserver 명령줄 옵션](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)
+- [Kubernetes — Kubernetes API Concepts](https://kubernetes.io/docs/reference/using-api/api-concepts/)
 - [Kubernetes — Consistent Reads from Cache Beta](https://kubernetes.io/blog/2024/08/15/consistent-read-from-cache-beta/)
 - [Kubernetes — kubectl get](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_get/)
 - [etcd — Frequently Asked Questions](https://etcd.io/docs/v3.6/faq/)
-- [Kubernetes — Kubernetes Scheduler](https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/)
-- [Kubernetes — Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
-- [Kubernetes — Scheduler Configuration](https://kubernetes.io/docs/reference/scheduling/config/)
-- [Kubernetes — Pod Priority and Preemption](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/)
-- [Kubernetes — Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
+- [etcd — Tuning](https://etcd.io/docs/v3.6/tuning/)
+- [etcd — Maintenance](https://etcd.io/docs/v3.6/op-guide/maintenance/)
 - [Kubernetes — Controllers](https://kubernetes.io/docs/concepts/architecture/controller/)
 - [Kubernetes — Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
-- [Kubernetes — StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
-- [Kubernetes — DaemonSet](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
+- [Kubernetes — kube-scheduler 명령줄 옵션](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-scheduler/)
+- [Kubernetes — Kubernetes Scheduler](https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/)
+- [Kubernetes — Scheduling Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
+- [Kubernetes — Scheduler Performance Tuning](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduler-perf-tuning/)
+- [Kubernetes — Pod Priority and Preemption](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/)
+- [Kubernetes — Container Runtime Interface](https://kubernetes.io/docs/concepts/architecture/cri/)
+- [cri-api — api.proto](https://github.com/kubernetes/cri-api/blob/master/pkg/apis/runtime/v1/api.proto)
+- [kubernetes — pkg/kubelet/config/apiserver.go](https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/config/apiserver.go)
+- [Kubernetes — Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
+- [Kubernetes — Node Status](https://kubernetes.io/docs/reference/node/node-status/)
+- [Kubernetes — Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)
 - [Kubernetes — Custom Resources](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/)
 - [Kubernetes — Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
 - [Prometheus Operator — Design](https://prometheus-operator.dev/docs/getting-started/design/)
-- [Operator SDK — Helm Operator Tutorial](https://sdk.operatorframework.io/docs/building-operators/helm/tutorial/)
 - 원글: [K8S 소개](https://kimjanghyun1010.tistory.com/26), [K8S scheduler](https://kimjanghyun1010.tistory.com/27), [K8S Pod](https://kimjanghyun1010.tistory.com/28), [(DeepDive) kubectl get pod 를 했을때?](https://kimjanghyun1010.tistory.com/99), [k8s Operator](https://kimjanghyun1010.tistory.com/24)

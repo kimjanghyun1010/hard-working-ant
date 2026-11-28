@@ -1,34 +1,17 @@
 ---
 title: 시크릿 관리
-description: 쿠버네티스 Secret이 평문으로 남는 자리부터 git에 암호화해 두기, 렌더링 때 주입하기, 클러스터 안에서 끌어오기까지 시크릿이 파드에 닿는 경로를 정리했다.
+description: DB 비밀번호 하나가 git에서 파드 안 프로세스까지 가는 동안 평문으로 남는 자리를 따라간다. Secret과 etcd 암호화, Sealed Secrets와 External Secrets, Vault의 봉인과 리스, 실행 중인 파드의 값 교체까지.
 date: 2026-11-05 12:00:00 +0900
 series: CI/CD와 IaC
 tags: [secret, kubernetes, argocd, gitops, vault, azure]
 scripts: [figures/secret-management.js]
 ---
 
-## GitOps와 시크릿
+## Secret 저장과 전달
 
-GitOps로 배포하면 클러스터에 올라가는 것은 전부 git에 있어야 한다. replicas나 이미지 태그는 그대로 적으면 되지만, DB 비밀번호를 values.yaml에 적어 푸시하면 문제가 생긴다.
+GitOps(git에 적은 상태로 클러스터를 맞추는 운영 방식)에서는 DB 비밀번호도 git에 있어야 한다. 그러면 비밀번호는 git에서 파드 안 프로세스까지 가는 동안 어디에 평문으로 남을까? git은 지운 값도 히스토리와 모든 클론에 남기므로, 한 번 푸시한 평문은 값을 바꾸는 것 말고 되돌릴 방법이 없다.
 
-git은 지운 것도 히스토리에 남긴다. 한 번 푸시한 비밀번호는 다음 커밋에서 지워도 모든 클론과 CI 작업 폴더에 그대로 있다. 두 장면에서 설정값과 비밀번호가 같은 길을 가며 어디에 흔적을 남기는지 본다.
-
-<figure class="fig" data-figure="secret-management-git">
-  <figcaption>설정값과 비밀번호가 git을 거쳐 클러스터까지 가는 길</figcaption>
-</figure>
-
-설정값은 어디에 남아도 상관없지만 비밀번호는 거쳐 간 자리마다 평문으로 남는다. 한 번 새어 나간 값은 회수할 수 없어서, 값을 바꾸는 것 말고는 방법이 없다.
-
-그래서 시크릿은 git에 평문으로 두지 않는다. 방법을 고를 때는 두 가지를 본다.
-
-- 저장 위치: git 안에 암호문으로 두는지, git 밖 시크릿 저장소(AWS Secrets Manager, Azure Key Vault, Vault)에 두는지
-- 평문이 되는 시점: 매니페스트를 렌더링할 때, 클러스터 안 컨트롤러가 받을 때, 파드가 시작할 때
-
-## 쿠버네티스 Secret
-
-### base64 인코딩
-
-Secret 매니페스트를 열면 값이 알아볼 수 없는 문자열이라 암호화된 것처럼 보인다. `data` 필드의 값은 base64로 인코딩한 것일 뿐이고, 키 없이 누구나 원래 값으로 되돌린다.
+쿠버네티스에서 비밀번호를 담는 객체는 Secret이다. `data`의 값은 알아볼 수 없는 문자열이지만 base64로 인코딩한 것일 뿐이고, 키 없이 누구나 원래 값으로 되돌린다. base64는 바이너리 값도 YAML에 담으려고 쓰는 표기법이지 암호가 아니다.
 
 ```yaml
 apiVersion: v1
@@ -40,26 +23,26 @@ data:
   password: czNjcjN0   # echo -n s3cr3t | base64
 ```
 
-값이 Secret이 되어 etcd에 들어갔다가 다시 읽혀 나오는 과정을 따라가 보자. 어느 단계에도 키가 없다는 점을 본다.
+API 서버는 기본 설정에서 이 값을 그대로 etcd에 쓴다. etcd는 클러스터의 모든 객체를 담는 키값 저장소이고, Secret은 `/registry/secrets/<네임스페이스>/<이름>` 키에 들어간다. 아래 그림처럼 저장하고 다시 읽는 어느 단계에도 키가 없다.
 
 <figure class="fig" data-figure="secret-management-base64">
   <figcaption>base64로 적은 값이 etcd에 저장되고 다시 읽히는 과정</figcaption>
 </figure>
 
-base64는 바이너리 값도 YAML에 담으려고 쓰는 표기법이다. 그래서 Secret 매니페스트를 git에 올리는 것은 평문을 올리는 것과 같다.
+etcd 다음 자리는 노드다. kubelet은 그 Secret을 쓰는 파드의 노드에만 값을 내려보내고, 볼륨으로 붙일 때는 디스크 대신 메모리 파일 시스템(tmpfs)에 쓴다. 파드가 지워지면 kubelet이 노드의 복사본도 지운다.
 
-쿠버네티스 문서는 Secret을 안전하게 쓰려면 최소한 아래를 하라고 적어 두었다.
+평문을 읽는 경로는 넓다.
 
-- 저장 시 암호화(encryption at rest)를 켠다.
-- RBAC로 Secret 접근을 최소로 준다. 네임스페이스에 파드를 만들 수 있는 사람은 그 네임스페이스의 Secret을 모두 읽을 수 있다. Deployment를 만들 수 있는 권한도 마찬가지다.
-- Secret을 필요한 컨테이너에만 연결한다.
-- 외부 시크릿 저장소를 검토한다.
+- `get secrets` 권한이 있는 사용자: API로 바로 읽는다.
+- 네임스페이스에 파드를 만들 수 있는 사용자: 그 Secret을 붙인 파드를 띄워 읽는다. Deployment를 만들 수 있는 권한도 같다.
+- `privileged: true`로 도는 컨테이너: 그 노드에서 쓰이는 Secret을 모두 읽는다.
+- etcd나 etcd 백업에 접근하는 사람: 파일만으로 읽는다.
 
-### etcd 저장 암호화
+앞의 세 경로는 RBAC(역할마다 API 권한을 나누는 체계)와 파드 보안 설정으로 좁힌다. 마지막 경로는 API 밖이라 RBAC가 닿지 않는다.
 
-etcd 백업 파일이 밖으로 나가면 그 안의 Secret이 그대로 읽힌다. 기본 설정의 API 서버는 Secret을 etcd에 평문으로 쓰기 때문이다.
+## etcd 저장 암호화
 
-API 서버에 `--encryption-provider-config`로 EncryptionConfiguration을 주면 etcd에 쓰기 전에 암호화한다. 쓸 때는 providers 목록의 첫 번째를 쓰고, 읽을 때는 목록을 차례로 시도한다.
+etcd 경로는 API 서버가 etcd에 쓰기 직전에 암호화해서 막는다(저장 시 암호화, encryption at rest). API 서버에 `--encryption-provider-config`로 EncryptionConfiguration 파일을 주면, 목록의 첫 provider로 암호화해 쓰고 읽을 때는 저장된 값에 맞는 provider를 차례로 시도한다.
 
 ```yaml
 apiVersion: apiserver.config.k8s.io/v1
@@ -74,245 +57,85 @@ resources:
       - identity: {}   # 암호화를 켜기 전에 쓴 평문 Secret을 읽는다
 ```
 
-provider는 키를 어디에 두느냐로 나뉜다.
+provider는 암호 방식과 키를 두는 자리로 나뉜다.
 
-- `identity`: 암호화하지 않는다. 기본값이다.
-- `aesgcm`, `secretbox`: 키를 설정 파일에 적는다. etcd 유출은 막지만 키가 컨트롤 플레인 호스트에 있어서, 호스트를 털리면 키도 같이 털린다. `aescbc`는 패딩 오라클 공격에 약해 권하지 않는다.
-- `kms` v2: 키를 클러스터 밖 KMS에 둔다. 1.29부터 stable이다. etcd와 KMS를 둘 다 털어야 평문이 나온다.
+- `identity`: 암호화하지 않는다. 아무것도 설정하지 않았을 때의 기본값이다.
+- `aescbc`: CBC가 패딩 오라클 공격에 약해 공식 문서가 권하지 않는다.
+- `aesgcm`: 쓰기 20만 번마다 키를 바꿔야 해서, 자동 회전이 없으면 권하지 않는다.
+- `secretbox`: 강하지만 키가 컨트롤 플레인 호스트의 설정 파일에 있다. 앞의 둘도 마찬가지다.
+- `kms` v2: 키를 클러스터 밖 KMS에 둔다. 1.29부터 stable이다.
 
-아래 데모에서 모드를 바꿔 가며 etcd 백업을 열어 본다. 같은 Secret이 백업 파일에 어떤 모양으로 남는지 지켜본다.
+키가 설정 파일에 있으면 etcd 백업 유출은 막아도, 컨트롤 플레인 호스트를 털리면 키도 함께 털린다. KMS는 봉투 암호화(envelope encryption)로 이 문제를 푼다. 데이터는 데이터 키(DEK)로 암호화하고, DEK는 KMS 안에만 있는 키 암호화 키(KEK)로 감싸서 감싼 DEK만 데이터 옆에 둔다.
+
+v2는 KEK가 바뀔 때만 바뀌는 시드(seed)에 난수를 섞어 쓰기마다 일회용 DEK를 만들어서, 쓰기마다 KMS를 부르던 v1보다 호출이 크게 준다. 같은 시드로 몇 번을 쓸지 통제할 수 없어서, 공식 문서는 KEK를 적어도 90일마다 바꾸라고 권한다.
+
+모드를 바꿔 가며 백업 열어 보기를 눌러, 같은 Secret이 백업 파일에 어떤 모양으로 남는지 비교한다.
 
 <figure class="fig" data-figure="secret-management-etcd">
   <figcaption>암호화 없음과 KMS v2에서 etcd 백업에 남는 값</figcaption>
 </figure>
 
-암호화가 없으면 백업 파일만으로 비밀번호가 읽힌다. KMS v2를 켜면 etcd에는 `k8s:enc:kms:v2:`로 시작하는 암호문만 남고, 데이터 키(DEK)를 감싸는 키는 클러스터 밖 KMS에 있다. 바뀌는 것은 etcd에 쓰기 직전 한 단계뿐이라, `kubectl get secret` 권한이 있는 사람에게는 여전히 평문이 보인다.
+암호화가 없으면 백업을 `etcdctl get`으로 열기만 해도 비밀번호가 보인다. KMS v2에서는 값이 `k8s:enc:kms:v2:<provider 이름>:` 접두어가 붙은 암호문으로 남고, 감싼 DEK를 풀 KEK가 클러스터 밖에 있어 백업만으로는 읽지 못한다.
 
-설정을 켜도 이미 저장된 Secret은 평문 그대로다. 한 번씩 다시 써야 암호화된다.
+암호화는 etcd에 쓰는 한 단계만 바꾼다. API로 읽으면 여전히 평문이 나오고, 설정을 켜기 전에 쓴 Secret은 다시 쓰기 전까지 평문 그대로다.
 
 ```bash
 kubectl get secrets --all-namespaces -o json | kubectl replace -f -
 ```
 
-관리형 클러스터는 API 서버 설정을 직접 바꿀 수 없어서 클라우드의 KMS 연동을 켠다. AKS는 1.33 이상 새 클러스터에 KMS 데이터 암호화(KMS data encryption)를 권한다. KMS 키를 지우면 그 키로 암호화한 Secret을 되살릴 수 없으니 키 삭제 보호부터 확인한다.
+관리형 클러스터는 클라우드의 KMS 연동을 켠다. 어느 쪽이든 Secret 매니페스트를 git에 올릴 수 없다는 사정은 그대로다.
 
-직접 구축한 클러스터라면 EncryptionConfiguration의 첫 provider가 `identity`가 아닌지부터 본다.
+## 암호문과 참조
 
-## 시크릿 주입 시점
+git에서 평문을 빼는 방법은 둘이다. 값을 암호문으로 바꿔 git에 두거나, git에는 "어느 저장소의 어느 값"이라는 참조만 두고 값은 git 밖 저장소에 둔다. 어느 쪽이든 평문은 어딘가에서 다시 생기고, 방식은 그 시점으로 갈린다.
 
-git에 평문을 두지 않는 방법은 모두 평문이 생기는 시점을 뒤로 미룬다. git에는 암호문이나 참조만 두고, 어느 단계에서 누가 풀어 주느냐로 방식이 갈린다.
+- 렌더링 때: git을 읽어 매니페스트를 만드는 Argo CD repo-server가 값을 채운다. argocd-vault-plugin(AVP)
+- 클러스터 컨트롤러가 받을 때: 컨트롤러가 Secret을 만든다. Sealed Secrets, External Secrets Operator(ESO)
+- 파드가 시작할 때: kubelet이 볼륨을 붙이며 값을 가져온다. Secrets Store CSI Driver
 
-- 렌더링 때: Argo CD repo-server가 매니페스트를 만들면서 값을 채운다. argocd-vault-plugin, Argo CD에서 쓰는 SOPS(KSOPS, helm-secrets)
-- 클러스터 안 컨트롤러가 받을 때: 동기화가 끝난 뒤 컨트롤러가 Secret을 만든다. Sealed Secrets, External Secrets Operator
-- 파드가 시작할 때: kubelet이 볼륨을 붙이면서 값을 가져온다. Secrets Store CSI Driver
-
-세 장면에서 칩이 git부터 파드까지 가는 동안 어느 단계에서 평문(주황)으로 바뀌는지 본다.
+아래 그림처럼 평문이 늦게 생길수록 평문을 쥐는 곳이 줄어든다.
 
 <figure class="fig" data-figure="secret-management-timing">
   <figcaption>방식마다 평문이 되는 단계</figcaption>
 </figure>
 
-평문이 늦게 생길수록 평문을 쥐는 곳이 줄어든다. 렌더링 때 풀면 Argo CD가 평문을 쥐고, 클러스터 컨트롤러가 풀면 Argo CD는 암호문이나 참조만 본다. 파드 시작 때 풀면 Secret 객체를 만들지 않아도 된다.
-
-늦게 푼다고 etcd 걱정이 사라지지는 않는다. Sealed Secrets도 ESO도 결과물은 쿠버네티스 Secret이라 etcd에 남으니, 앞의 저장 암호화는 어느 방식이든 필요하다.
-
-Argo CD 공식 문서도 같은 기준으로 나눈다. 대상 클러스터에서 시크릿을 채우는 방식을 강하게 권하고, 매니페스트 생성 때 주입하는 방식은 강하게 말린다.
-
-## git에 암호화해 두기
-
-값 자체를 암호문으로 바꿔 git에 둔다. 외부 저장소가 없어도 되고, 값이 바뀐 이력이 커밋으로 남는다.
+Argo CD 공식 문서도 대상 클러스터에서 채우는 방식을 권한다.
 
 ### Sealed Secrets
 
-Sealed Secrets는 공개키 암호를 쓴다. 클러스터 안 컨트롤러가 키 쌍을 만들고, 개발자는 공개키로 봉인한 SealedSecret만 git에 올린다. 개인키는 컨트롤러만 가지고 있어서 저장소가 공개돼도 풀 수 없다.
+Sealed Secrets는 공개키 암호를 쓴다. 컨트롤러가 처음 뜰 때 4096비트 RSA 키 쌍을 만들고, 개발자는 공개키로 봉인한 SealedSecret만 git에 올린다. 값은 일회용 AES-256-GCM 세션 키로 암호화하고, 그 세션 키를 RSA-OAEP로 감싼다.
 
-개인키가 클러스터 밖으로 한 번도 나가지 않는 것을 보자.
+기본 범위(strict)에서는 이름과 네임스페이스가 암호문에 묶인다. 컨트롤러는 30일마다 새 키를 만들고 옛 키를 지우지 않는다. 키 갱신은 비밀번호 교체가 아니라서, 값을 바꾸고 다시 봉인하는 일은 사람이 한다.
 
-<figure class="fig" data-figure="secret-management-sealed">
-  <figcaption>공개키로 봉인하고 클러스터 안에서 푸는 흐름</figcaption>
-</figure>
+개인키는 컨트롤러 네임스페이스의 일반 Secret에 저장된다. etcd 암호화가 없으면 git의 모든 SealedSecret을 푸는 키가 etcd에 평문으로 있는 셈이고, 이 키를 잃으면 git의 SealedSecret을 아무도 풀지 못한다. **개인키 백업과 etcd 암호화**를 함께 챙긴다.
 
-```bash
-kubectl create secret generic db --from-literal=password=s3cr3t \
-  --dry-run=client -o yaml | kubeseal --format yaml > db-sealed.yaml
-```
+### 렌더링 주입
 
-Argo CD는 SealedSecret을 다른 리소스처럼 동기화만 하고 평문은 보지 않는다. 평문 Secret은 컨트롤러가 클러스터 안에서 만든다.
-
-컨트롤러는 30일마다 새 봉인 키를 만들고 옛 키도 지우지 않는다. 키를 갱신해도 이미 올린 값은 그대로라서, 비밀번호 자체를 주기적으로 바꾸고 다시 봉인하는 일은 사람이 한다. 개인키를 잃으면 git의 SealedSecret을 아무도 풀 수 없으니 **개인키 백업**부터 챙긴다.
-
-### SOPS
-
-SOPS는 YAML이나 JSON 파일을 트리로 다뤄 키 이름은 평문으로 두고 값만 암호화한다. diff에서 어느 항목이 바뀌었는지 보여서 리뷰가 쉽다. 암호화 키는 age, PGP, AWS KMS, GCP KMS, Azure Key Vault 중에서 고른다.
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: db
-stringData:
-  password: ENC[AES256_GCM,data:...,type:str]
-sops:
-  age: [...]
-```
-
-복호화를 어디서 하느냐는 GitOps 도구마다 다르다. 두 장면에서 키가 놓인 자리와 평문이 남는 자리를 견줘 보자.
-
-<figure class="fig" data-figure="secret-management-sops">
-  <figcaption>같은 SOPS 파일을 Flux와 Argo CD가 푸는 자리</figcaption>
-</figure>
-
-Flux는 kustomize-controller가 클러스터 안에서 적용 직전에 푼다. Argo CD는 SOPS를 직접 풀지 않아서 KSOPS나 helm-secrets를 repo-server에 붙이고, 그러면 복호화가 렌더링 때 일어난다.
-
-같은 SOPS 파일이어도 Argo CD에서는 다음 묶음의 렌더링 주입과 같은 약점을 진다. Argo CD를 쓴다면 SOPS보다 Sealed Secrets나 클러스터에서 끌어오는 방식부터 본다.
-
-## 렌더링 때 주입하기
-
-git에는 값 대신 자리표시자를 두고, Argo CD가 매니페스트를 만들 때 외부 저장소에서 값을 가져와 채운다. 기존 Helm 차트의 values만 고치면 돼서 붙이기는 쉽다.
-
-### argocd-vault-plugin
-
-argocd-vault-plugin(AVP)은 Argo CD의 설정 관리 플러그인(CMP)으로 돈다. values.yaml의 값 자리에 `<path:경로#키>`를 적어 두면, repo-server가 `helm template`으로 만든 YAML에서 자리표시자를 찾아 저장소의 값으로 바꾼다.
+AVP는 Argo CD의 설정 관리 플러그인(CMP, 매니페스트를 만드는 외부 도구)으로, repo-server 파드에 사이드카(같은 파드에서 함께 도는 보조 컨테이너)로 붙는다. values.yaml의 값 자리에 `<path:경로#키>`를 적어 두면, `helm template`으로 만든 YAML에서 자리표시자를 찾아 저장소의 값으로 바꾼다. 백엔드는 `AVP_TYPE`으로 고르고, AWS Secrets Manager(ASM)에서는 경로에 시크릿 이름을, `#` 뒤에 그 안의 키를 적는다.
 
 ```yaml
 extraEnvs:
-  - name: REDIS_ADDRESSES
-    value: <path:company/dev#redis-addresses>
   - name: REDIS_PASSWORD
     value: <path:company/dev#redis-password>
 ```
 
-AWS Secrets Manager(ASM)에서는 경로 자리에 시크릿 이름을, `#` 뒤에 그 시크릿 안의 키를 적는다. 백엔드는 `AVP_TYPE`으로 고르고 Vault, Azure Key Vault 등도 된다.
-
-아래 그림에서 자리표시자가 값으로 바뀌는 자리와, 바뀐 매니페스트가 어디에 남는지 본다.
+아래 그림처럼 값은 repo-server 안에서 평문이 되고, 완성된 매니페스트는 Redis에 평문으로 캐시된다.
 
 <figure class="fig" data-figure="secret-management-avp">
   <figcaption>자리표시자가 repo-server 안에서 값으로 바뀌는 흐름</figcaption>
 </figure>
 
-값은 repo-server 안에서 평문이 되고, Argo CD는 완성된 매니페스트를 Redis에 평문으로 캐시한다. git에서는 비밀번호를 뺐지만 Argo CD 내부에 평문이 생긴다.
-
-그래서 AVP를 쓴다면 repo-server와 Redis로 가는 네트워크 접근을 막아 둔다. Argo CD 문서가 드는 완화책도 이것이다.
-
-### 설치와 설정
-
-AVP는 repo-server 파드에 사이드카로 붙인다. 사이드카는 Argo CD 이미지로 `argocd-cmp-server`를 띄우고, repo-server와 `/var/run/argocd`의 유닉스 소켓으로 주고받는다. 아래는 argo-cd Helm 차트의 `repoServer` 값이다.
-
-```yaml
-extraContainers:
-  - name: avp-helm
-    command: [/var/run/argocd/argocd-cmp-server]
-    image: quay.io/argoproj/argocd:v3.6.3   # 쓰는 Argo CD와 같은 버전
-    securityContext:
-      runAsNonRoot: true
-      runAsUser: 999
-    env:
-      - name: AVP_TYPE
-        value: awssecretsmanager
-      - name: AWS_REGION
-        value: ap-northeast-2
-    volumeMounts:
-      - { name: var-files, mountPath: /var/run/argocd }
-      - { name: plugins, mountPath: /home/argocd/cmp-server/plugins }
-      - { name: cmp-tmp, mountPath: /tmp }
-      - { name: argocd-cmp-cm, mountPath: /home/argocd/cmp-server/config/plugin.yaml, subPath: avp-helm.yaml }
-      - { name: custom-tools, mountPath: /usr/local/bin/argocd-vault-plugin, subPath: argocd-vault-plugin }
-```
-
-`custom-tools`는 initContainer가 AVP 바이너리를 내려받아 채우는 볼륨이다. 플러그인이 할 일은 `configs.cmp.create: true`로 두고 `configs.cmp.plugins`에 적는다. 차트가 이 값으로 `argocd-cmp-cm`을 만든다.
-
-```yaml
-avp-helm:
-  allowConcurrency: true
-  discover:
-    find:
-      command: [sh, -c, "find . -name Chart.yaml"]
-  generate:
-    command:
-      - sh
-      - -c
-      - |
-        helm dependency build . >/dev/null 2>&1 || true
-        helm template $ARGOCD_APP_NAME -n $ARGOCD_APP_NAMESPACE ${ARGOCD_ENV_HELM_ARGS} . |
-        argocd-vault-plugin generate -
-  lockRepo: false
-```
-
-Application은 `source.helm` 대신 `source.plugin`을 쓴다. env 이름이 사이드카에 어떤 이름으로 도착하는지 보자.
-
-<figure class="fig" data-figure="secret-management-cmp">
-  <figcaption>Application의 env가 사이드카까지 가는 길</figcaption>
-</figure>
-
-Argo CD는 Application에 적은 env 이름 앞에 `ARGOCD_ENV_`를 붙여 넘긴다. Application에는 접두어 없이 적고, plugin 명령에서 `ARGOCD_ENV_`를 붙여 읽는다. Application에 `ARGOCD_ENV_`까지 적으면 접두어가 두 번 붙어 명령에서 읽히지 않는다.
-
-```yaml
-# 기존
-source:
-  helm:
-    valueFiles: [values-dev.yaml]
-# 변경
-source:
-  plugin:
-    name: avp-helm
-    env:
-      - name: HELM_ARGS
-        value: -f values-dev.yaml
-```
-
-릴리스 이름은 plugin 명령이 `$ARGOCD_APP_NAME`으로 정한다. 기존 `releaseName`을 쓰던 앱은 이름이 바뀌어 리소스가 새로 만들어질 수 있으니, 옮기기 전에 `argocd app diff`로 렌더링 결과를 견준다.
-
-자격증명은 AWS SDK의 기본 규칙을 따른다. 액세스 키를 Secret으로 넣으면 그 키를 회전할 일이 생기므로, EKS라면 repo-server 서비스 계정에 IAM 역할을 붙인다(IRSA).
-
-`source.helm`을 `source.plugin`으로 바꾸는 일은 환경 수만큼 반복된다. valueFiles가 HELM_ARGS 문자열로 옮겨 가며 오타가 나기 쉬워서, 한 환경에서 diff를 확인한 뒤 넓힌다.
-
-### 값 변경과 Hard Refresh
-
-ASM에서 비밀번호를 바꾸고 Refresh와 Sync를 눌렀는데 클러스터의 값이 그대로다. repo-server는 같은 커밋이면 전에 만든 매니페스트를 캐시에서 꺼내 쓰고, AVP를 다시 돌리지 않는다.
-
-모드를 바꿔 가며 ASM 값을 바꾼 뒤 새로고침해 본다. 캐시 줄의 밀린 값(주황)이 언제 새 값(파랑)으로 바뀌는지 지켜본다.
-
-<figure class="fig" data-figure="secret-management-refresh">
-  <figcaption>ASM 값을 바꾼 뒤 Refresh와 Hard Refresh</figcaption>
-</figure>
-
-Refresh는 캐시된 매니페스트를 다시 써서, 뒤이은 Sync도 v1을 적용한다. Hard Refresh는 매니페스트 캐시까지 버려 AVP가 다시 돌고, 그다음 Sync가 v2를 적용한다. 둘의 차이는 **캐시를 버리느냐** 하나뿐이다.
+캐시는 값 교체도 막는다. repo-server는 같은 커밋이면 매니페스트 생성 결과를 캐시에서 꺼내 쓰고(`--repo-cache-expiration` 기본 24시간), AVP를 다시 돌리지 않는다. ASM에서 값을 바꾼 뒤 Refresh와 Sync를 눌러도 옛 값이 적용되고, 캐시를 버리는 Hard Refresh를 해야 AVP가 새 값을 가져온다.
 
 ```bash
 argocd app diff <앱> --hard-refresh
 ```
 
-Sync가 바꾸는 것은 Secret이고 파드는 그대로다. 환경 변수로 읽는 앱은 재시작해야 새 값을 본다.
+아무도 Hard Refresh를 하지 않으면, 이미지 태그만 바꾼 다음 배포가 렌더링을 다시 하면서 비밀번호도 함께 바뀐다. 시크릿 반영이 앱 배포에 묶여 장애 원인을 가리기 어려워진다. Argo CD 문서는 Redis 평문 캐시와 배포에 묶인 갱신에 더해, 렌더링 결과를 git에 커밋하는 Rendered Manifests 패턴과 맞지 않는다며 이 방식을 말리고, 쓰는 동안은 네트워크 정책으로 Redis와 repo-server로 가는 직접 접근을 막으라고 권한다.
 
-### 렌더링 주입의 한계
+### 클러스터 주입
 
-ASM 값을 월요일에 바꾸고 아무도 Hard Refresh를 누르지 않았다. 수요일에 이미지 태그만 바꾼 배포가 나가자 비밀번호도 같이 바뀌었다. 새 커밋이 생기면 캐시가 맞지 않아 렌더링을 다시 하고, 그때 AVP가 새 값을 가져오기 때문이다.
-
-아래 그림에서 관련 없는 커밋이 생기는 순간 클러스터의 Secret이 함께 바뀌는 것을 본다.
-
-<figure class="fig" data-figure="secret-management-render-risk">
-  <figcaption>시크릿 변경이 관련 없는 배포에 섞여 반영되는 과정</figcaption>
-</figure>
-
-렌더링 주입에서는 시크릿이 반영되는 시점이 앱 배포에 묶인다. 장애가 나면 이미지 태그 변경과 비밀번호 변경 중 어느 쪽이 원인인지 가리기 어렵다.
-
-Argo CD 공식 문서가 이 방식을 말리는 이유도 세 가지다.
-
-- 보안: Argo CD가 시크릿에 접근해야 하고, 생성한 매니페스트를 Redis에 평문으로 캐시한다.
-- 사용성: 시크릿 갱신이 앱 동기화에 묶여, 관련 없는 배포에 시크릿 변경이 섞여 들어간다.
-- 렌더링된 매니페스트 패턴(Rendered Manifests pattern)과 함께 쓸 수 없다.
-
-Argo CD는 이 방식을 계속 지원하지만 새 기능이나 개선은 우선하지 않는다고 적었다. AVP 저장소도 마지막 릴리스가 v1.18.1(2024년 6월)이고 기본 브랜치의 마지막 커밋이 2024년 10월이다(2026년 11월 확인, 보관 처리는 되지 않음).
-
-새로 도입한다면 다음 묶음의 방식부터 검토한다. 이미 AVP를 쓰고 있다면 Redis와 repo-server 접근을 막아 두고, 새 앱부터 옮긴다.
-
-## 클러스터 안에서 끌어오기
-
-git에는 "어느 저장소의 어느 값"이라는 참조만 두고, 클러스터 안 구성 요소가 저장소에서 값을 직접 가져온다. Argo CD는 참조만 동기화하므로 평문을 보지 않는다.
-
-### External Secrets Operator
-
-External Secrets Operator(ESO)는 ExternalSecret 리소스를 보고 외부 저장소에서 값을 읽어 쿠버네티스 Secret을 만든다. `refreshInterval`마다 다시 읽어서, 저장소의 값이 바뀌면 Secret도 따라 바뀐다.
+ESO는 git에 둔 ExternalSecret을 보고 외부 저장소에서 값을 읽어 Secret을 만든다. `refreshInterval`(기본 1시간)마다 다시 읽어서, 저장소의 값이 바뀌면 Secret도 따라 바뀐다.
 
 ```yaml
 apiVersion: external-secrets.io/v1
@@ -323,7 +146,6 @@ spec:
   refreshInterval: 1h
   secretStoreRef:
     name: aws-store
-    kind: SecretStore
   target:
     name: redis
   data:
@@ -333,123 +155,87 @@ spec:
         property: redis-password
 ```
 
-아래 그림에서 Argo CD가 다루는 것은 참조뿐이고, 값은 ESO와 저장소 사이에서만 오가는 것을 본다.
+아래 그림처럼 Argo CD는 참조만 동기화하고, 값은 ESO와 저장소 사이에서만 오간다.
 
 <figure class="fig" data-figure="secret-management-eso">
   <figcaption>ExternalSecret이 Secret이 되기까지</figcaption>
 </figure>
 
-결과물이 평범한 Secret이라 앱 쪽은 바꿀 것이 없다. 다만 Secret으로 etcd에 남으므로 앞의 저장 암호화가 그대로 필요하고, 값이 바뀌어도 환경 변수로 읽는 파드는 재시작해야 한다.
+결과물이 일반 Secret이라 기존 차트는 `secretKeyRef`로 그대로 읽는다. 같은 이유로 etcd 저장 암호화는 여전히 필요하다.
 
-AVP에서 옮긴다면 `<path:...>` 자리표시자들을 ExternalSecret 하나로 모으고, 차트에서는 그 Secret을 `secretKeyRef`로 참조한다. 시크릿 갱신 주기가 앱 배포와 떨어진다.
+Secrets Store CSI Driver는 Secret 객체를 거치지 않는다. 파드가 시작할 때 kubelet이 CSI 볼륨을 붙이면, 드라이버가 저장소별 provider(Azure, AWS, GCP, Vault)에게 gRPC로 값을 받아 파드의 tmpfs 볼륨에 파일로 쓴다. `secretObjects`로 Secret도 만들 수 있는데, 볼륨을 붙인 파드가 있는 동안만 존재한다.
 
-### Secrets Store CSI Driver
+AKS에서는 `azure-keyvault-secrets-provider` 애드온이 드라이버와 Azure provider를 띄운다. Key Vault 접근에는 노드의 파드가 나눠 쓰는 애드온 관리 ID보다 서비스 계정마다 나뉘는 워크로드 ID를 쓰고, 역할은 읽기 전용인 `Key Vault Secrets User`로 준다.
 
-Secrets Store CSI Driver는 Secret 객체를 거치지 않고 값을 파드에 파일로 붙인다. 파드가 시작할 때 kubelet이 CSI 볼륨을 붙이면, 드라이버가 provider에게 값을 받아 파드의 볼륨에 쓴다. 리눅스에서는 이 볼륨이 메모리 파일 시스템(tmpfs)이다.
+## Vault 내부 구조
 
-드라이버는 저장소를 모르고, 저장소별 provider(Azure, AWS, GCP, Vault)가 gRPC로 값을 가져온다. 어느 저장소의 어느 값을 가져올지는 SecretProviderClass에 적는다.
+ASM과 Key Vault는 넣어 둔 값을 꺼내 주는 저장소다. 여러 서비스가 같은 DB 계정을 나눠 쓰고, 값이 새면 다음 교체 때까지 쓸 수 있다. HashiCorp Vault는 요청마다 수명이 붙은 계정을 만들어 이 시간을 줄이고, AVP, ESO, CSI provider가 모두 백엔드로 지원한다.
 
-파드 시작 한 번에 값이 어느 길로 들어오는지 따라가 보자.
+### 봉인과 해제
 
-<figure class="fig" data-figure="secret-management-csi">
-  <figcaption>파드가 시작할 때 Key Vault 값이 파일이 되는 과정</figcaption>
-</figure>
+Vault는 데이터를 담는 스토리지 백엔드를 믿지 않는다. 데이터가 Vault를 떠날 때마다 배리어(barrier)가 256비트 AES-GCM으로 암호화해서, 백엔드에는 암호문만 있다. 키는 세 겹이다.
 
-값은 노드의 드라이버와 provider를 지나 파드의 파일로 남는다. Secret 객체도 필요하면 `secretObjects`로 동기화하는데, 이 Secret은 볼륨을 붙인 파드가 시작한 뒤에 생기고 그 파드들이 모두 지워지면 함께 지워진다.
+- 암호화 키: 데이터를 암호화한다. 키링(keyring)에 들어 있다.
+- 루트 키(root key): 키링을 암호화한다. 백엔드에 다른 데이터와 함께 암호문으로 있다.
+- 봉인 해제 키(unseal key): 루트 키를 푼다. Vault 어디에도 저장하지 않는다.
 
-그래서 동기화한 Secret을 환경 변수로만 쓰는 파드라도 CSI 볼륨은 붙여 둬야 한다.
-
-### AKS 애드온 설정
-
-AKS에서는 드라이버와 Azure provider를 애드온으로 켠다. 노드마다 `aks-secrets-store-csi-driver`와 `aks-secrets-store-provider-azure` 파드가 뜬다.
+Vault는 시작할 때마다 봉인(sealed) 상태다. 백엔드는 읽을 수 있지만 루트 키를 풀 수 없어 어떤 값도 복호화하지 못한다. 기본 설정은 봉인 해제 키를 샤미르 비밀 분산(Shamir's Secret Sharing)으로 조각 5개로 나누고, 그중 3개가 모여야 키를 다시 맞춘다.
 
 ```bash
-az aks enable-addons --addons azure-keyvault-secrets-provider \
-  --name <클러스터> --resource-group <리소스 그룹>
+vault operator init               # 기본 -key-shares=5 -key-threshold=3
+vault operator unseal <조각>       # 서로 다른 조각으로 세 번 하면 Unsealed
 ```
 
-애드온을 켜면 노드 리소스 그룹(`MC_`)에 `azurekeyvaultsecretsprovider-<클러스터>` 관리 ID가 생겨 노드 VMSS에 붙는다. Key Vault에 접근하는 ID는 둘 중 하나를 쓴다.
+조각을 나눠 들면 혼자 Vault를 열지 못하지만, 재시작마다 세 사람이 모여야 한다. 그래서 보통은 자동 해제(auto unseal)로 봉인 해제 키 보관을 클라우드 KMS나 HSM에 맡긴다. 이때 운영자가 받는 복구 키로는 루트 키를 풀 수 없어서, KMS에 닿지 못하면 Vault도 열리지 않는다.
 
-- 애드온 관리 ID: 설정이 가장 짧다. 노드에 붙은 ID라서, SecretProviderClass에 이 ID를 적은 파드는 모두 같은 권한을 쓴다.
-- 워크로드 ID: 서비스 계정 토큰을 Entra ID 토큰으로 바꾼다. 서비스 계정마다 권한을 나눌 수 있다. 예전 파드 관리 ID(pod-managed identity)는 2022년 10월에 폐기됐다.
+### 토큰과 리스
 
-두 장면에서 Key Vault가 받는 토큰이 누구 몫인지 견줘 보자.
+Vault에 값을 묻는 쪽은 먼저 인증 방법(auth method)으로 로그인해 토큰을 받는다. 쿠버네티스 인증은 파드의 서비스 계정 JWT(쿠버네티스가 서명한 신원 토큰)를 받아 TokenReview API로 API 서버에 진짜인지 묻고, 역할에 묶인 서비스 계정과 네임스페이스면 정책(policy)이 붙은 토큰을 준다. 정책이 허용하지 않은 경로는 모두 거부된다.
 
-<figure class="fig" data-figure="secret-management-aks-identity">
-  <figcaption>애드온 관리 ID와 워크로드 ID의 권한 범위</figcaption>
+동적 시크릿과 service 토큰(기본 종류의 Vault 토큰)에는 리스(lease)가 붙는다. 리스는 유효 시간(TTL)과 갱신 가능 여부를 담고, 서버 설정의 기본 TTL과 최대 TTL은 둘 다 768시간(32일)이다. 리스가 끝나면 만료 관리자(expiration manager)가 비밀값을 폐기하고, `vault lease revoke -prefix aws/`처럼 경로 단위로 한꺼번에 폐기할 수도 있다.
+
+### 동적 시크릿
+
+리스가 힘을 쓰는 곳은 동적 시크릿(dynamic secret)이다. database 시크릿 엔진은 비밀번호를 저장해 두지 않고, 요청이 올 때마다 역할에 적은 `creation_statements`로 DB 계정을 새로 만들어 돌려준다. 서비스마다 계정이 달라 DB 감사 로그에서 접속자가 갈리고, 리스가 끝나면 Vault가 그 계정을 지운다.
+
+{% raw %}
+```bash
+vault write database/roles/app db_name=pg default_ttl=1h max_ttl=24h \
+  creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';"
+vault read database/creds/app     # 읽을 때마다 새 계정과 lease_id
+```
+{% endraw %}
+
+아래 그림처럼 계정이 TTL과 함께 사라지므로, 평문이 어딘가에 새도 쓸 수 있는 시간이 TTL로 묶인다. 대신 앱이 한 번 읽은 값을 계속 쓰면 만료 순간 접속이 끊긴다.
+
+<figure class="fig" data-figure="secret-management-lease">
+  <figcaption>TTL 1시간 동적 계정의 리스 만료와 연장</figcaption>
 </figure>
 
-관리 ID는 같은 노드의 다른 앱도 같은 값을 읽을 수 있다. 앱마다 볼트나 값을 나눠야 하면 워크로드 ID를 쓴다.
+그래서 동적 시크릿은 갱신을 대신 해 주는 Vault Agent와 함께 쓴다. Agent Injector는 파드에 `vault.hashicorp.com/agent-inject: "true"` 어노테이션이 있으면 웹훅으로 init 컨테이너와 사이드카를 끼워 넣고, 값을 `/vault/secrets` 아래 공유 메모리 볼륨에 파일로 쓴다. 사이드카는 리스를 다음 기준으로 관리한다.
 
-어느 ID든 시크릿을 읽는 데는 `Key Vault Secrets User` 역할이면 된다. `Key Vault Administrator`를 주면 값을 지우고 권한까지 바꿀 수 있어서, ID가 털렸을 때 피해가 커진다.
+- 갱신할 수 있는 리스: TTL의 2/3가 지나면 연장한다.
+- 갱신할 수 없는 리스: TTL의 90%에서 새 값을 받아 파일을 다시 쓴다.
+- 리스가 없는 KV 값: 5분마다 다시 읽는다(`static_secret_render_interval`).
 
-```bash
-ID=$(az aks show -g <리소스 그룹> -n <클러스터> \
-  --query addonProfiles.azureKeyvaultSecretsProvider.identity.objectId -o tsv)
-az role assignment create --role "Key Vault Secrets User" \
-  --assignee-object-id $ID --assignee-principal-type ServicePrincipal \
-  --scope $(az keyvault show -n <볼트> --query id -o tsv)
+## 파드의 값 교체
+
+저장소에서 값을 바꿔도 실행 중인 프로세스가 새 값을 보는 시점은 앱이 값을 받는 방법에 따라 갈린다. Secret 볼륨은 kubelet이 갱신한다. kubelet은 노드의 파드가 쓰는 Secret을 캐시에 두고 기본 전략(`Watch`)에서는 API 서버의 watch로 변경을 받아서, 파드 볼륨에 반영되기까지 kubelet 동기화 주기(`syncFrequency`, 기본 1분)에 캐시 전파 지연을 더한 만큼 걸린다.
+
+파일을 바꾸는 방법은 원자적이다. kubelet은 새 값을 타임스탬프 이름의 숨은 디렉터리에 다 쓴 뒤, `..data` 심볼릭 링크를 그 디렉터리로 rename 한 번에 바꾼다. 앱이 여는 `password`는 `..data/password`를 가리키는 링크라서 반쯤 쓰인 파일을 읽지 않는다.
+
+```text
+$ ls -la /etc/db
+..2026_11_05_03_00_00.123456789/
+..data -> ..2026_11_05_03_00_00.123456789
+password -> ..data/password
 ```
 
-SecretProviderClass에는 볼트 이름과 테넌트, 가져올 값을 적는다. `userAssignedIdentityID`에는 애드온 ID의 clientId를 넣는다.
+출력은 줄인 예시다. subPath로 붙인 파일은 이 링크 구조를 거치지 않고 컨테이너가 시작할 때의 파일 하나를 직접 붙여서, `..data`가 바뀌어도 옛 파일을 계속 본다. 그래서 subPath 마운트는 갱신을 받지 못한다.
 
-```yaml
-apiVersion: secrets-store.csi.x-k8s.io/v1
-kind: SecretProviderClass
-metadata:
-  name: azure-kv
-spec:
-  provider: azure
-  parameters:
-    usePodIdentity: "false"
-    useVMManagedIdentity: "true"
-    userAssignedIdentityID: <애드온 ID의 clientId>
-    keyvaultName: <볼트 이름>
-    tenantId: <테넌트 ID>
-    objects: |
-      array:
-        - |
-          objectName: password1
-          objectType: secret
-  secretObjects:
-    - secretName: db
-      type: Opaque
-      data:
-        - objectName: password1   # 마운트된 파일 이름
-          key: password           # 만들 Secret의 키
-```
+환경 변수는 컨테이너가 시작할 때 프로세스 환경에 복사된다. Secret이 바뀌어도 재시작 전까지 옛 값이다.
 
-파드는 CSI 볼륨을 붙이고, 환경 변수는 동기화된 Secret을 참조한다.
-
-```yaml
-containers:
-  - name: app
-    env:
-      - name: DB_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            name: db
-            key: password
-    volumeMounts:
-      - name: kv
-        mountPath: /mnt/secrets-store
-        readOnly: true
-volumes:
-  - name: kv
-    csi:
-      driver: secrets-store.csi.k8s.io
-      readOnly: true
-      volumeAttributes:
-        secretProviderClass: azure-kv
-```
-
-`secretKeyRef`의 `key`는 Key Vault 객체 이름(`password1`)이 아니라 `secretObjects`에서 정한 키(`password`)다. 둘을 헷갈리면 파드가 `CreateContainerConfigError`로 시작하지 못한다.
-
-애드온은 AKS가 버전을 관리해서 사용자가 올릴 일이 없다. 2026년 11월 기준 오픈소스 최신 릴리스는 드라이버 v1.6.2, Azure provider v1.8.2다. 직접 Helm으로 설치한 드라이버가 있으면 지우고 애드온으로 옮긴다.
-
-### 값 교체와 재시작
-
-Key Vault에서 비밀번호를 바꾸면 파드는 바로 새 값을 보지 못한다. 애드온은 기본으로 교체 감지(autorotation)가 꺼져 있고, 켜면 기본 2분마다 저장소를 다시 읽어 파일과 동기화된 Secret을 고친다.
+CSI 볼륨은 드라이버가 저장소를 다시 읽어야 바뀐다. 교체 감지(rotation)는 기본으로 꺼져 있고, 켜면 `--rotation-poll-interval`(기본 2분)마다 저장소를 다시 읽어 파일과 동기화된 Secret을 고친다. AKS 애드온에서는 이렇게 켠다.
 
 ```bash
 az aks addon update -g <리소스 그룹> -n <클러스터> \
@@ -457,61 +243,52 @@ az aks addon update -g <리소스 그룹> -n <클러스터> \
   --enable-secret-rotation --rotation-poll-interval 2m
 ```
 
-모드를 바꿔 가며 Key Vault 값을 바꿔 본다. 맨 아래 줄에서 앱이 읽는 값이 언제 새 값(파랑)이 되는지 본다.
+모드를 바꿔 가며 Key Vault 값 바꾸기를 눌러, 맨 아래 줄의 앱이 읽는 값이 언제 새 값이 되는지 비교한다.
 
 <figure class="fig" data-figure="secret-management-rotation">
   <figcaption>값 교체 뒤 파일로 읽는 앱과 환경 변수로 읽는 앱 (2분 폴링 기준)</figcaption>
 </figure>
 
-파일로 읽는 앱은 다음 폴링 때 파일이 바뀌어 2분 안에 새 값을 본다. 앱이 파일을 다시 읽어야 한다는 조건이 붙는다. 환경 변수는 파드가 시작할 때 한 번 정해져서, 동기화된 Secret이 바뀌어도 재시작 전까지 옛 값이다.
+두 모드에서 Key Vault와 동기화된 Secret이 바뀌는 시각은 같다. 파일로 읽는 앱은 다음 폴링에서 파일이 바뀌어 2분 안에 새 값을 보지만, 앱이 파일을 다시 읽어야 한다는 조건이 붙는다. 환경 변수로 읽는 앱은 프로세스가 시작할 때 받은 복사본을 쥐고 있어서 재시작해야 새 값을 본다.
 
-- 파일로 읽기: 앱이 파일 변경을 감지하거나 요청마다 다시 읽게 한다.
-- 환경 변수로 읽기: Reloader처럼 Secret 변경을 보고 롤링 재시작하는 도구를 같이 둔다.
-- `subPath`로 마운트한 파일은 교체되지 않는다. 쿠버네티스의 제약이라 재시작해야 한다.
-
-## 방식 선택 기준
-
-- 외부 저장소 없이 git만으로 끝내고 싶다: Sealed Secrets. 개인키 백업과 값 교체를 사람이 챙긴다.
-- AWS Secrets Manager, Vault 같은 저장소가 이미 있다: External Secrets Operator. 결과가 일반 Secret이라 기존 차트를 그대로 쓴다.
-- Secret 객체를 남기지 않거나 AKS에서 Key Vault를 쓴다: CSI 드라이버. 애드온으로 켜고 워크로드 ID로 권한을 나눈다.
-- AVP를 이미 쓰고 있다: Redis와 repo-server 접근을 막고, 새 앱부터 ESO로 옮긴다.
-
-어느 방식이든 Secret이 etcd에 남는 한 저장 암호화와 Secret 읽기 RBAC는 따로 챙긴다.
+- 파일로 읽기: 앱이 파일 변경을 감지하거나 요청마다 다시 읽게 한다. subPath는 쓰지 않는다.
+- 환경 변수로 읽기: Reloader처럼 Secret 변경을 보고 롤링 재시작하는 도구를 함께 둔다.
 
 ## 정리
 
-| 방식 | 저장 위치 | 평문이 되는 때 | 기억할 점 |
-|---|---|---|---|
-| 쿠버네티스 Secret | etcd | 항상 (base64) | 저장 암호화와 RBAC를 따로 켠다 |
-| Sealed Secrets | git (암호문) | 클러스터 컨트롤러가 받을 때 | 개인키 백업, 값 교체는 사람이 한다 |
-| SOPS | git (값만 암호문) | Flux는 적용 직전, Argo CD는 렌더링 때 | Argo CD에서는 플러그인이 필요하다 |
-| argocd-vault-plugin | 외부 저장소 | 렌더링 때 | Hard Refresh, Redis 평문 캐시. Argo CD가 권하지 않는다 |
-| External Secrets Operator | 외부 저장소 | 컨트롤러가 읽을 때 | 결과는 일반 Secret. refreshInterval마다 갱신 |
-| Secrets Store CSI Driver | 외부 저장소 | 파드 시작 때 | 동기화 Secret은 파드가 있을 때만. 환경 변수는 재시작 |
+- Secret의 base64는 표기법이라, 기본 설정에서 비밀번호는 etcd, 노드의 tmpfs, 파드를 만들 수 있는 사람에게 평문으로 열려 있다.
+- 저장 시 암호화는 etcd 한 자리만 막는다. KMS v2는 KEK를 클러스터 밖에 두고, 켜기 전의 Secret은 다시 써야 한다.
+- git에는 암호문(Sealed Secrets)이나 참조(ESO, CSI, AVP)만 둔다. 평문이 늦게 생길수록 쥐는 곳이 줄고, AVP는 Redis에 평문을 남긴다.
+- Vault는 백엔드에 암호문만 두고 시작할 때마다 봉인된다. 동적 시크릿은 리스가 끝나면 계정을 지워 새어 나간 평문의 수명을 TTL로 묶는다.
+- Secret 볼륨은 kubelet이 `..data` 링크를 바꿔 1분 남짓에 갱신하고, subPath와 환경 변수는 재시작해야 새 값을 본다.
 
 ## 참고
 
 - [Kubernetes — Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
-- [Kubernetes — Encrypting Confidential Data at Rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
-- [Kubernetes — Using a KMS provider for data encryption](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/)
+- [Kubernetes — Distribute Credentials Securely](https://kubernetes.io/docs/tasks/inject-data-application/distribute-credentials-secure/)
+- [Kubernetes — Encrypting Data at Rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
+- [Kubernetes — KMS provider](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/)
+- [Kubernetes — Kubelet Configuration](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/)
+- [Kubernetes 소스 — pkg/volume/util/atomic_writer.go](https://github.com/kubernetes/kubernetes/blob/master/pkg/volume/util/atomic_writer.go)
 - [Argo CD — Secret Management](https://argo-cd.readthedocs.io/en/stable/operator-manual/secret-management/)
-- [Argo CD — Config Management Plugins](https://argo-cd.readthedocs.io/en/stable/operator-manual/config-management-plugins/)
-- [Argo CD — argocd app get (--hard-refresh)](https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_app_get/)
+- [Argo CD — argocd-repo-server](https://argo-cd.readthedocs.io/en/stable/operator-manual/server-commands/argocd-repo-server/)
 - [argocd-vault-plugin — How it works](https://argocd-vault-plugin.readthedocs.io/en/stable/howitworks/)
-- [argocd-vault-plugin — Backends](https://argocd-vault-plugin.readthedocs.io/en/stable/backends/)
-- [argocd-vault-plugin — Usage (Refreshing values)](https://argocd-vault-plugin.readthedocs.io/en/stable/usage/)
-- [argocd-vault-plugin — Releases](https://github.com/argoproj-labs/argocd-vault-plugin/releases)
+- [argocd-vault-plugin — Usage](https://argocd-vault-plugin.readthedocs.io/en/stable/usage/)
 - [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets)
-- [SOPS — Security (keys in cleartext, values encrypted)](https://getsops.io/docs/security/)
-- [Flux — Manage Kubernetes secrets with SOPS](https://fluxcd.io/flux/guides/mozilla-sops/)
-- [KSOPS](https://github.com/viaduct-ai/kustomize-sops)
+- [Sealed Secrets — crypto.md](https://github.com/bitnami-labs/sealed-secrets/blob/main/docs/developer/crypto.md)
 - [External Secrets Operator — ExternalSecret](https://external-secrets.io/latest/api/externalsecret/)
 - [Secrets Store CSI Driver — Concepts](https://secrets-store-csi-driver.sigs.k8s.io/concepts.html)
-- [Secrets Store CSI Driver — Releases](https://github.com/kubernetes-sigs/secrets-store-csi-driver/releases)
-- [Azure Key Vault provider — Releases](https://github.com/Azure/secrets-store-csi-driver-provider-azure/releases)
-- [Microsoft Learn — Use the Azure Key Vault provider for Secrets Store CSI Driver in AKS](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-driver)
-- [Microsoft Learn — Access Azure Key Vault with the CSI Driver identity provider](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-identity-access)
-- [Microsoft Learn — Secrets Store CSI Driver configuration options (autorotation, sync)](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-configuration-options)
-- [Microsoft Learn — KMS etcd encryption in AKS](https://learn.microsoft.com/en-us/azure/aks/use-kms-etcd-encryption)
+- [Secrets Store CSI Driver — Secret Auto Rotation](https://secrets-store-csi-driver.sigs.k8s.io/topics/secret-auto-rotation.html)
+- [Microsoft Learn — CSI Driver configuration options](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-configuration-options)
+- [Microsoft Learn — CSI Driver identity access](https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-identity-access)
+- [Vault — Seal/Unseal](https://developer.hashicorp.com/vault/docs/concepts/seal)
+- [Vault — Security model](https://developer.hashicorp.com/vault/docs/internals/security)
+- [Vault — operator init](https://developer.hashicorp.com/vault/docs/commands/operator/init)
+- [Vault — Lease](https://developer.hashicorp.com/vault/docs/concepts/lease)
+- [Vault — Server configuration](https://developer.hashicorp.com/vault/docs/configuration)
+- [Vault — Kubernetes auth method](https://developer.hashicorp.com/vault/docs/auth/kubernetes)
+- [Vault — Database secrets engine](https://developer.hashicorp.com/vault/docs/secrets/databases)
+- [Vault — Agent Injector](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/injector)
+- [Vault — Agent templates](https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent/template)
 - [Reloader](https://github.com/stakater/Reloader)
 - 원글: [ArgoCD + Vault Plugin](https://kimjanghyun1010.tistory.com/109), [azure keyvault secrets provider](https://kimjanghyun1010.tistory.com/52)

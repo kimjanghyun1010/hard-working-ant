@@ -1,9 +1,7 @@
-// K8S best practices post: pod start, stop and drain moments, placement, and security checks.
+// K8S pod replacement post: probes, rolling update, termination, drain with PDB, and spreading.
 (() => {
   const U = hwa.ui, C = hwa.cv, TAU = Math.PI * 2;
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
-  const ease = (t, a, b) => hwa.smooth((t - a) / (b - a));
-  const lerp = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
   const tw = (ctx, s, size, weight = 400) => { ctx.font = U.font(size, weight); return ctx.measureText(s).width; };
   const each = (id, fn) => document.querySelectorAll(`[data-figure="k8s-best-practices-${id}"]`).forEach(fn);
   // Chip colours as [background, text, border].
@@ -121,22 +119,6 @@
       return out;
     };
 
-    // The three moments: a pod starting, a pod stopping, a node drained. Times are rough, for shape.
-    lanes('moments', [
-      { pill: '새 파드 시작', tone: 'warn', span: 10, tick: 2, lanes: ['새 파드', '받은 요청'], legend: [['ok', '성공'], ['bad', '실패']],
-        segs: [[0, 0, 1, 'stop', ''], [0, 1, 5, 'wait', '앱 기동 중'], [0, 5, 10, 'run', '준비됨']],
-        marks: reqs(1, 1.3, 9.7, 0.6, (v) => (v < 5 ? 'bad' : 'ok')), events: [[1, 'Running'], [5, '앱 준비 끝', 0, U.tones.ok[1]]],
-        stamp: ['준비 전 요청 실패', 'bad'], note: '컨테이너가 Running이 되자마자 요청이 들어와, 앱 기동이 끝날 때까지 실패한다.' },
-      { pill: '옛 파드 종료', tone: 'warn', span: 10, tick: 2, lanes: ['옛 파드', '받은 요청'], legend: [['ok', '성공'], ['bad', '실패']],
-        segs: [[0, 0, 4, 'run', '서비스'], [0, 4, 10, 'stop', '종료됨']],
-        marks: reqs(1, 0.4, 6.4, 0.6, (v) => (v < 4 ? 'ok' : 'bad')), events: [[4, 'SIGTERM'], [6.5, '규칙에서 빠짐', 1, U.slate]],
-        stamp: ['빠지기 전 요청 실패', 'bad'], note: '프로세스는 SIGTERM에 바로 내려갔는데, 규칙에서 빠지기 전까지 요청이 계속 온다.' },
-      { pill: '노드 drain', tone: 'bad', span: 10, tick: 2, lanes: ['파드 1', '파드 2', '보낸 요청'], legend: [['ok', '성공'], ['bad', '실패']],
-        segs: [[0, 0, 3, 'run', '서비스'], [0, 3.6, 8, 'wait', '다른 노드에서 기동'], [0, 8, 10, 'run', ''], [1, 0, 3, 'run', '서비스'], [1, 3.8, 8.2, 'wait', '다른 노드에서 기동'], [1, 8.2, 10, 'run', '']],
-        marks: reqs(2, 0.4, 9.4, 0.6, (v) => (v >= 3 && v < 8 ? 'bad' : 'ok')), events: [[3, '노드 drain'], [8, '새 파드 준비', 0, U.tones.ok[1]]],
-        stamp: ['받을 파드가 없음', 'bad'], note: '같은 노드의 파드 둘이 한꺼번에 내려가, 새 파드가 준비될 때까지 받을 곳이 없다.' },
-    ]);
-
     // Startup: liveness defaults (period 10s, failureThreshold 3) against a 60s start. Backoff 10s then 20s per pod-lifecycle docs.
     lanes('startup', [
       { pill: 'startupProbe 없음', tone: 'bad', span: 90, tick: 30, lanes: ['앱', 'liveness'], legend: [['ok', '성공'], ['bad', '실패']],
@@ -230,7 +212,7 @@
       });
     });
 
-    // Liveness demo: a load spike slows every pod. Strict liveness (timeout 1s) restarts A, its share moves to B and C, and they follow.
+    // Liveness, interactive: a load spike slows every pod. Strict liveness (timeout 1s) restarts A, its share moves to B and C, and they follow.
     each('liveness', (root) => {
       const ROW = 48, SPIKE = [0.6, 5.0], END = 7, RUN = '부하 몰리게 하기';
       // Restart times follow checks every 0.5 after latency passes 1s: A from 0.9, B and C once A's share lands on them.
@@ -271,7 +253,7 @@
       });
     });
 
-    // preStop demo: deleting pod A starts SIGTERM and endpoint removal together. Removal reaching kube-proxy at 2s is a rough value.
+    // preStop, interactive: deleting pod A starts SIGTERM and endpoint removal together. Removal reaching kube-proxy at 2s is a rough value.
     each('prestop', (root) => {
       const ROW = 50, OUT = 2, END = 7, RUN = '파드 A 삭제';
       const MODES = [{ term: 0, down: 0.3 }, { term: 5, down: 5.3 }];
@@ -342,23 +324,22 @@
       pod(ctx, b, p.name, S[0], S[1], S[2]);
     };
 
-    // PDB demo: replicas 3 with A1 and A2 on node 1. Drain evicts both at once, or one at a time under minAvailable 2.
+    // PDB: replicas 3 with A1 and A2 on node 1. Drain evicts both at once, or one at a time under minAvailable 2.
     each('pdb', (root) => {
-      const NH = 24 + 2 * 38 + 4, END = 8.5, RUN = '노드 1 drain';
+      const NH = 24 + 2 * 38 + 4, END = 8.5, LEAD = 0.6, SEC = END + LEAD, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
       // [evict, gone] per old pod, [made, ready] per replacement. Startup takes 3.4 s, a rough value.
       const MODES = [{ a2: [0.3, 1.3], r2: [0.6, 4.0] }, { a2: [4.3, 5.3], r2: [4.6, 8.0] }];
       const notes = ['PDB가 없으면 A1과 A2가 같이 내려가, 새 파드가 준비될 때까지 1개로 버틴다.', 'minAvailable 2면 A2의 eviction이 거부되고, A1의 대체 파드가 준비된 뒤에 A2가 내려간다.'];
       const state = (m, r, [a, b]) => (r < a ? 'ready' : r < b ? 'stop' : null), born = (r, [a, b]) => (r < a ? null : r < b ? 'start' : 'ready');
       const readyN = (m, r) => [state(m, r, [0.3, 1.3]), state(m, r, m.a2), 'ready', born(r, [0.6, 4.0]), born(r, m.r2)].filter((s) => s === 'ready').length;
       hwa.scene(root, {
-        height: 34 + NH + 128, still: 0, notes,
-        demo: { modes: ['PDB 없음', 'PDB minAvailable 2'], run: RUN },
-        frame: (ctx, w, h, time, say, ui) => {
-          const on = ui.runAt !== null, m = MODES[ui.mode], r = on ? Math.min(time - ui.runAt, END) : -1, n = readyN(m, r);
+        height: 34 + NH + 128, still: S.at(1) + SEC, scenes: S, notes,
+        frame: (ctx, w, h, time, say) => {
+          const { i, t } = hwa.loop(time, SEC, HOLD, 2), r = t - LEAD, on = r >= 0, m = MODES[i], n = readyN(m, r);
           C.pill(ctx, 0, 0, `준비된 파드 ${n}/3`, n === 3 ? 'ok' : n === 2 ? 'warn' : 'bad');
-          if (ui.mode) C.text(ctx, 'minAvailable 2', w, 11, { size: 10, weight: 600, color: U.text, align: 'right', base: 'middle' });
+          if (i) C.text(ctx, 'minAvailable 2', w, 11, { size: 10, weight: 600, color: U.text, align: 'right', base: 'middle' });
           const N = nodes(ctx, w, 34, NH, [{ name: '노드 1', tag: on && r >= 0.2 ? ['drain', T.orange] : null }, { name: '노드 2' }, { name: '노드 3' }]);
-          const a1 = state(m, r, [0.3, 1.3]), a2 = state(m, r, m.a2), blocked = ui.mode && on && r >= 0.3 && r < m.a2[0];
+          const a1 = state(m, r, [0.3, 1.3]), a2 = state(m, r, m.a2), blocked = i && r >= 0.3 && r < m.a2[0];
           slotPod(ctx, N[0].slot(0), a1 && { name: 'A1', st: a1 });
           slotPod(ctx, N[0].slot(1), a2 && { name: 'A2', st: blocked ? 'deny' : a2 });
           slotPod(ctx, N[1].slot(0), { name: 'A3', st: 'ready' });
@@ -369,17 +350,17 @@
           // Ready count over time, with the minAvailable line.
           const gy = 34 + NH + 34, gh = 64, x0 = 22, x1 = w - 4, X = (v) => x0 + (v / END) * (x1 - x0);
           const Y = C.panel(ctx, x0, gy, x1 - x0, gh, { title: '준비된 파드 수', max: 3, ticks: [[0, '0'], [1, '1'], [2, '2'], [3, '3']] });
-          C.dashed(ctx, x0, Y(2), x1, Y(2), ui.mode ? U.tones.ok[1] : '#cbd5e1');
-          if (on) {
+          C.dashed(ctx, x0, Y(2), x1, Y(2), i ? U.tones.ok[1] : '#cbd5e1');
+          {
             const pts = [];
             for (let v = 0; v <= r + 1e-6; v += 0.05) pts.push([X(v), Y(readyN(m, v))]);
             C.line(ctx, pts, U.blue, 2);
             const lo = pts.length ? pts[pts.length - 1] : [X(0), Y(3)];
             C.dot(ctx, lo[0], lo[1], n < 2 ? U.red : U.blue);
-            stampIf(ctx, (x0 + x1) / 2, gy + gh / 2, ui.mode ? '2개 아래로 안 내려감' : '1개까지 줄어듦', ui.mode ? 'ok' : 'bad', (r - END + 0.6) / 0.4);
-          } else hint(ctx, w, gy + gh / 2, RUN);
+            stampIf(ctx, (x0 + x1) / 2, gy + gh / 2, i ? '2개 아래로 안 내려감' : '1개까지 줄어듦', i ? 'ok' : 'bad', (r - END + 0.6) / 0.4);
+          }
           C.text(ctx, '시간', x1, gy + gh + 14, { size: 10, align: 'right' });
-          say(`${ui.mode ? 'PDB minAvailable 2' : 'PDB 없음'}. 준비된 파드 ${n}개. ${notes[ui.mode]}`);
+          say(`${i ? 'PDB minAvailable 2' : 'PDB 없음'}. 준비된 파드 ${n}개. ${notes[i]}`);
         },
       });
     });
@@ -447,229 +428,4 @@
       },
     });
   });
-
-  // Node-pressure eviction on an 8Gi node. Ranking per node-pressure-eviction docs: usage over request first, then by how much.
-  each('eviction', (root) => {
-    const SEC = 5, HOLD = 1.8, CAP = 8, LIM = 7.5, S = hwa.loopScenes(SEC, HOLD, 3);
-    // [name, QoS, request, usage per scene]. Sizes are example values.
-    const P = [['G', 'Guaranteed', 2, [2, 2, 2]], ['B1', 'Burstable', 1, [2, 3.6, 0]], ['BE', 'BestEffort', 0, [1, 1, 1]], ['B2', 'Burstable', 2, [1, 1, 1]]];
-    const notes = ['노드 메모리 8Gi에 파드 넷. 빗금은 request를 넘겨 쓰는 부분이다.', 'B1이 3.6Gi까지 늘어 노드 사용량이 축출 기준을 넘는다.', 'kubelet은 request를 가장 많이 넘긴 B1부터 내보낸다. BestEffort보다 먼저다.'];
-    const FILL = ['#dbeafe', '#ede9fe', '#e2e8f0', '#ccfbf1'], LINE = ['#93c5fd', '#a78bfa', '#94a3b8', '#5eead4'];
-    hwa.scene(root, {
-      height: 268, still: S.at(2) + SEC, scenes: S, notes,
-      frame: (ctx, w, h, time, say) => {
-        const { i, k } = hwa.loop(time, SEC, HOLD, 3), run = (time % (3 * (SEC + HOLD))) - S.at(i);
-        const use = P.map((p) => {
-          if (i === 0) return p[3][0] * ease(k, 0.05, 0.4);
-          if (i === 1) return p[3][0] + (p[3][1] - p[3][0]) * ease(k, 0.1, 0.6);
-          return p[3][1] + (p[3][2] - p[3][1]) * ease(k, 0.35, 0.7);
-        });
-        const total = use.reduce((a, b) => a + b, 0), over = total > LIM;
-        C.pill(ctx, 0, 0, `노드 메모리 ${total.toFixed(1)}/8Gi`, over ? 'bad' : i === 2 ? 'ok' : 'info');
-        const by = 52, bh = 30, X = (v) => (v / CAP) * w;
-        C.box(ctx, 0, by, w, bh, { fill: U.plot, r: 4 });
-        let x = 0;
-        P.forEach((p, j) => {
-          const u = use[j], wq = X(Math.min(u, p[2])), wo = X(Math.max(0, u - p[2])), evict = i === 2 && j === 1;
-          if (u <= 0.01) return;
-          ctx.fillStyle = evict ? T.red[0] : FILL[j]; ctx.fillRect(x, by, wq + wo, bh);
-          if (wo > 0) { ctx.fillStyle = C.hatch(ctx, evict ? U.red : '#ef4444'); ctx.fillRect(x + wq, by, wo, bh); }
-          ctx.strokeStyle = evict ? U.red : LINE[j]; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, by + 0.5, wq + wo - 1, bh - 1);
-          if (wq + wo > 22) C.text(ctx, p[0], x + Math.max(wq, 22) / 2, by + bh / 2 + 0.5, { size: 10, weight: 700, color: U.text, align: 'center', base: 'middle' });
-          x += wq + wo;
-        });
-        C.dashed(ctx, X(LIM), by - 8, X(LIM), by + bh + 4, U.red);
-        C.text(ctx, '축출 기준', X(LIM) - 4, by - 10, { size: 9, weight: 700, color: U.red, align: 'right' });
-        ['0', '4Gi', '8Gi'].forEach((s, j) => C.text(ctx, s, (j * w) / 2, by + bh + 14, { size: 9, align: ['left', 'center', 'right'][j] }));
-        const wide = w > 460, ry = 130;
-        P.forEach((p, j) => {
-          const y = ry + j * 28, u = use[j], ov = u - p[2], evict = i === 2 && j === 1 && k > 0.35;
-          ctx.fillStyle = FILL[j]; ctx.fillRect(0, y - 6, 4, 12);
-          C.text(ctx, p[0], 10, y, { size: 11, weight: 700, color: U.text, base: 'middle' });
-          C.text(ctx, p[1], 34, y, { size: 9, base: 'middle' });
-          C.text(ctx, wide ? `request ${p[2]}Gi, 사용 ${u.toFixed(1)}Gi` : `${p[2]} / ${u.toFixed(1)}Gi`, wide ? w * 0.34 : 104, y, { size: 10, color: U.text, base: 'middle' });
-          if (evict) tag(ctx, '축출', w, y, T.red, { align: 'right' });
-          else if (ov > 0.05) C.text(ctx, `+${ov.toFixed(1)}Gi 초과`, w, y, { size: 10, weight: 700, color: U.red, align: 'right', base: 'middle' });
-          else C.text(ctx, 'request 안', w, y, { size: 10, color: U.tones.ok[1], align: 'right', base: 'middle' });
-        });
-        if (!wide) C.text(ctx, 'request / 사용', 104, ry - 17, { size: 9 });
-        if (i === 1 && over) stampIf(ctx, w / 2, 250, '축출 기준 넘음', 'bad', (k - 0.6) / 0.08);
-        if (i === 2) stampIf(ctx, w / 2, 250, 'B1부터 축출', 'warn', (run - SEC) / 0.4);
-        say(`노드 메모리 ${total.toFixed(1)}Gi. ${notes[i]}`);
-      },
-    });
-  });
-
-  // Group: admission and API checks. A chip travels left to right and stops where it is refused.
-  {
-    const travel = (ctx, s, pts, k, col) => { if (k > 0) tag(ctx, s, ...C.pathAt(pts, k).pop(), col); };
-
-    // Pod Security: enforce applies to the pods a Deployment creates, not to the Deployment itself.
-    each('psa', (root) => {
-      const SEC = 5.5, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3);
-      const SC = [
-        { mode: 'warn', pod: 'root 파드', pass: true, warn: true, pill: 'warn: restricted', tone: 'warn', stamp: ['경고만 남고 생성', 'warn'] },
-        { mode: 'enforce', pod: 'root 파드', pass: false, pill: 'enforce: restricted', tone: 'bad', stamp: ['파드 생성 거부', 'bad'] },
-        { mode: 'enforce', pod: 'non-root 파드', pass: true, pill: 'enforce: restricted', tone: 'ok', stamp: ['그대로 통과', 'ok'] },
-      ];
-      const notes = ['warn 모드에서는 경고만 남고 파드가 뜬다.', 'enforce 모드에서는 Deployment는 받아들여지지만, 그 Deployment가 만드는 파드가 거부돼 새 버전이 뜨지 않는다.', 'securityContext를 맞춘 파드는 enforce에서도 그대로 통과한다.'];
-      hwa.scene(root, {
-        height: 222, still: S.at(1) + SEC, scenes: S, notes,
-        frame: (ctx, w, h, time, say) => {
-          const { i, k } = hwa.loop(time, SEC, HOLD, 3), sc = SC[i], run = (time % (3 * (SEC + HOLD))) - S.at(i);
-          C.pill(ctx, 0, 0, sc.pill, sc.tone);
-          const dw = Math.round(w * 0.24), ax = Math.round(w * 0.31), aw = Math.round(w * 0.33), nx = ax + aw + Math.round(w * 0.05), nw = w - nx;
-          const gy = 34, gh = 150, cy = gy + 78, refused = !sc.pass && k > 0.45;
-          C.card(ctx, { x: 0, y: cy - 26, w: dw, h: 52, t: 'Deployment', s: refused ? '새 파드 0개' : 'v2 배포', size: 11 }, { stroke: refused ? T.red[2] : U.grid });
-          C.group(ctx, ax, gy, aw, gh, 'API 서버', gy + 16);
-          tag(ctx, sc.mode, ax + aw / 2, gy + 40, sc.mode === 'enforce' ? T.red : T.orange);
-          const ps = { x: ax + 8, y: cy - 22, w: aw - 16, h: 44, t: 'Pod Security', s: 'restricted', size: 11 };
-          C.card(ctx, ps, { lit: k > 0.3 && k < 0.6 });
-          C.group(ctx, nx, gy, nw, gh, '노드', gy + 16);
-          const slot = (j) => ({ x: nx + 6, y: gy + 26 + j * 40, w: nw - 12, h: 34 });
-          [0, 1].forEach((j) => pod(ctx, slot(j), 'v1', '', T.gray));
-          const s2 = slot(2), landed = sc.pass && k > 0.85;
-          if (landed) pod(ctx, s2, 'v2', '', T.gray, { fill: T.blue[0], stroke: T.blue[2] });
-          else C.box(ctx, s2.x, s2.y, s2.w, s2.h, { fill: '#fff', dash: [3, 3], stroke: '#e2e8f0', r: 7 });
-          const chip = sc.pod, col = sc.pass ? T.blue : T.orange;
-          const p1 = [[dw, cy], [ps.x + ps.w / 2, cy]], p2 = [[ps.x + ps.w / 2, cy], [nx + nw / 2, s2.y + s2.h / 2]];
-          if (k < 0.45) travel(ctx, chip, p1, ease(k, 0.05, 0.4), col);
-          else if (!sc.pass) {
-            tag(ctx, chip, ps.x + ps.w / 2, cy + 36, T.red);
-            C.text(ctx, '403 거부', ps.x + ps.w / 2, cy + 56, { size: 10, weight: 700, color: U.red, align: 'center' });
-          } else if (!landed) travel(ctx, chip, p2, ease(k, 0.5, 0.85), col);
-          if (sc.warn && k > 0.45) tag(ctx, '경고', dw / 2, cy - 38, T.orange);
-          stampIf(ctx, w / 2, gy + gh + 20, sc.stamp[0], sc.stamp[1], (run - SEC) / 0.4);
-          say(`${sc.pill}, ${sc.pod}. ${notes[i]}`);
-        },
-      });
-    });
-
-    // RBAC: a compromised pod asks for Secrets with its mounted token. It stops at authentication or authorization, or gets through.
-    each('rbac', (root) => {
-      const SEC = 5.5, HOLD = 1.8, S = hwa.loopScenes(SEC, HOLD, 3);
-      const SC = [
-        { token: true, stop: 2, pill: 'default 계정, 넓은 권한', tone: 'bad', stamp: ['Secret 유출', 'bad'] },
-        { token: false, stop: 0, pill: '토큰 마운트 끔', tone: 'ok', stamp: ['인증에서 막힘, 401', 'ok'] },
-        { token: true, stop: 1, pill: 'configmaps 읽기만', tone: 'ok', stamp: ['권한에서 막힘, 403', 'ok'] },
-      ];
-      const notes = ['default 계정에 넓은 권한이 묶여 있으면, 털린 파드의 토큰으로 Secret을 읽어 간다.', '토큰을 마운트하지 않으면 요청이 인증 단계에서 막힌다.', '필요한 권한만 담은 Role을 묶으면 Secret 요청은 RBAC 단계에서 막힌다.'];
-      hwa.scene(root, {
-        height: 222, still: S.at(2) + SEC, scenes: S, notes,
-        frame: (ctx, w, h, time, say) => {
-          const { i, k } = hwa.loop(time, SEC, HOLD, 3), sc = SC[i], run = (time % (3 * (SEC + HOLD))) - S.at(i), wide = w > 460;
-          C.pill(ctx, 0, 0, sc.pill, sc.tone);
-          const pw = Math.round(w * 0.27), ax = Math.round(w * 0.34), aw = Math.round(w * 0.3), sx = ax + aw + Math.round(w * 0.05), sw = w - sx;
-          const gy = 34, gh = 150, cy = gy + 84;
-          C.group(ctx, 0, gy, pw, gh, '털린 파드', gy + 16);
-          C.card(ctx, { x: 8, y: cy - 22, w: pw - 16, h: 44, t: '앱', s: wide ? '공격자 셸' : '셸', size: 11 }, { stroke: T.red[2] });
-          if (sc.token) tag(ctx, '토큰', pw / 2, gy + 44, T.orange);
-          else C.text(ctx, '토큰 없음', pw / 2, gy + 44, { size: 10, weight: 600, align: 'center', base: 'middle' });
-          C.group(ctx, ax, gy, aw, gh, 'API 서버', gy + 16);
-          const auth = { x: ax + 8, y: gy + 28, w: aw - 16, h: 40, t: '인증', size: 11 }, rbac = { x: ax + 8, y: gy + 96, w: aw - 16, h: 40, t: 'RBAC', size: 11 };
-          C.card(ctx, auth, { lit: k > 0.15 && k < 0.35 });
-          C.card(ctx, rbac, { lit: sc.stop > 0 && k > 0.4 && k < 0.6 });
-          C.card(ctx, { x: sx, y: cy - 22, w: sw, h: 44, t: 'Secret', s: wide ? 'DB 비밀번호' : '', size: 11 }, { stroke: sc.stop === 2 && k > 0.65 ? U.red : U.grid });
-          const ac = [auth.x + auth.w / 2, auth.y + auth.h / 2], rc = [rbac.x + rbac.w / 2, rbac.y + rbac.h / 2], sc2 = [sx + sw / 2, cy];
-          const route = [[pw - 4, cy], ac, rc, sc2], stops = [0.33, 0.66, 1], end = stops[sc.stop], label = wide ? 'GET secrets' : 'GET';
-          const f = Math.min(ease(k, 0.05, 0.7) / end, 1) * end;
-          if (sc.stop === 2 && k > 0.72) travel(ctx, '유출', [sc2, [pw - 4, cy]], ease(k, 0.72, 0.95), T.red);
-          else if (f < end - 1e-3 || sc.stop === 2) travel(ctx, label, route, f, T.blue);
-          else {
-            const at = sc.stop ? rc : ac;
-            tag(ctx, sc.stop ? '403' : '401', at[0], at[1] + (sc.stop ? 30 : 32), T.red);
-          }
-          stampIf(ctx, w / 2, gy + gh + 20, sc.stamp[0], sc.stamp[1], (run - SEC) / 0.4);
-          say(`${sc.pill}. ${notes[i]}`);
-        },
-      });
-    });
-
-    // ResourceQuota: requests.cpu 4 filled by four 1-CPU pods leaves no room for the rolling update's extra pod.
-    each('quota', (root) => {
-      const SEC = 6, HOLD = 2, S = hwa.loopScenes(SEC, HOLD, 2);
-      const notes = ['쿼터 4에 1 CPU 파드 4개면, 롤링 업데이트가 더 띄우는 다섯 번째 파드가 403으로 거부된다.', '쿼터를 maxSurge만큼 5로 두면 새 파드가 들어가고, 준비된 뒤 옛 파드가 하나 빠지며 롤아웃이 이어진다.'];
-      hwa.scene(root, {
-        height: 214, still: S.at(1) + SEC, scenes: S, notes,
-        frame: (ctx, w, h, time, say) => {
-          const { i, k } = hwa.loop(time, SEC, HOLD, 2), run = (time % (2 * (SEC + HOLD))) - S.at(i), Q = i ? 5 : 4;
-          const admitted = i && k > 0.4, ready = i && k > 0.7, oldGone = i && k > 0.85, used = 4 + (admitted ? 1 : 0) - (oldGone ? 1 : 0);
-          C.pill(ctx, 0, 0, `requests.cpu: ${Q}`, i ? 'ok' : 'warn');
-          C.text(ctx, `사용 ${used}/${Q}`, w, 11, { size: 11, weight: 700, color: used >= Q && !i ? U.tones.bad[1] : U.text, align: 'right', base: 'middle' });
-          C.group(ctx, 0, 34, w, 172, '네임스페이스 api', 50);
-          const cw = (w - 20 - 4 * 6) / 5, cx = (j) => 10 + j * (cw + 6);
-          C.text(ctx, '쿼터 칸 (1 CPU씩)', 10, 70, { size: 9 });
-          for (let j = 0; j < 5; j++) {
-            const inQ = j < Q, full = j < used;
-            ctx.beginPath(); ctx.roundRect(cx(j), 78, cw, 14, 4);
-            ctx.fillStyle = !inQ ? '#fff' : full ? U.blue : U.cell; ctx.fill();
-            if (!inQ) { ctx.setLineDash([3, 3]); ctx.strokeStyle = T.red[2]; ctx.stroke(); ctx.setLineDash([]); }
-          }
-          if (!i) C.text(ctx, '쿼터 밖', cx(4) + cw / 2, 104, { size: 9, weight: 600, color: U.red, align: 'center' });
-          const py = 128;
-          for (let j = 0; j < 4; j++) {
-            const gone = j === 0 && oldGone;
-            const b = { x: cx(j), y: py, w: cw, h: 34 };
-            C.box(ctx, b.x, b.y, b.w, b.h, { fill: gone ? U.plot : '#fff', dash: gone ? [4, 3] : null, stroke: '#cbd5e1', r: 6 });
-            C.text(ctx, gone ? '종료' : 'v1', b.x + cw / 2, py + 17.5, { size: 11, weight: 700, color: gone ? U.muted : U.text, align: 'center', base: 'middle' });
-          }
-          const nb = { x: cx(4), y: py, w: cw, h: 34 }, drop = [[cx(4) + cw / 2, 40], [cx(4) + cw / 2, py + 17]];
-          if (admitted) {
-            const col = ready ? T.blue : T.orange;
-            C.box(ctx, nb.x, nb.y, nb.w, nb.h, { fill: col[0], stroke: col[2], r: 6 });
-            C.text(ctx, ready ? 'v2' : '기동', nb.x + cw / 2, py + 17.5, { size: 11, weight: 700, color: col[1], align: 'center', base: 'middle' });
-          } else {
-            C.box(ctx, nb.x, nb.y, nb.w, nb.h, { fill: '#fff', dash: [3, 3], stroke: '#e2e8f0', r: 6 });
-            const f = ease(k, 0.05, 0.4), y = drop[0][1] + (drop[1][1] - drop[0][1]) * (i ? f : Math.min(f, 0.55));
-            if (i || k < 0.45) tag(ctx, 'v2', drop[0][0], y, T.blue);
-            else tag(ctx, '403 거부', drop[0][0], py + 17, T.red);
-          }
-          C.text(ctx, i ? (oldGone ? '롤아웃 진행 중' : '') : k > 0.45 ? '롤아웃 멈춤' : '', 10, 194, { size: 10, weight: 700, color: i ? U.tones.ok[1] : U.red });
-          stampIf(ctx, w / 2, 112, i ? '여유 1칸으로 진행' : '추가 파드 거부', i ? 'ok' : 'bad', (run - SEC) / 0.4);
-          say(`requests.cpu 쿼터 ${Q}, 사용 ${used}. ${notes[i]}`);
-        },
-      });
-    });
-
-    // Image tags: a moved tag gives a replaced node a different image; a digest gives every node the same one.
-    each('image', (root) => {
-      const SEC = 6.5, HOLD = 2, PUSH = 1.4, SWAP = 2.8, S = hwa.loopScenes(SEC, HOLD, 2);
-      const notes = ['latest를 쓰면 새 이미지가 올라온 뒤 교체된 노드의 파드만 9f8e를 받아, 같은 태그로 다른 코드가 돈다.', '다이제스트로 고정하면 새 이미지가 올라와도 새 노드는 같은 1a2b를 받는다.'];
-      hwa.scene(root, {
-        height: 230, still: S.at(1) + SEC, scenes: S, notes,
-        frame: (ctx, w, h, time, say) => {
-          const { i, k } = hwa.loop(time, SEC, HOLD, 2), t = k * SEC, run = (time % (2 * (SEC + HOLD))) - S.at(i), wide = w > 460;
-          C.pill(ctx, 0, 0, i ? 'image: api@sha256:1a2b' : 'image: api:latest', i ? 'ok' : 'warn');
-          const rw = Math.round(w * 0.38), nx = rw + Math.round(w * 0.08), nw = w - nx, gy = 34, gh = 160;
-          C.group(ctx, 0, gy, rw, gh, '레지스트리', gy + 16);
-          const pushed = t >= PUSH, rowY = [gy + 46, gy + 86];
-          // Tag rows: the name on top, the digest it points to underneath.
-          const row = (y, name, dig, col, a = 1) => {
-            if (a <= 0) return;
-            ctx.globalAlpha = a;
-            C.text(ctx, name, 10, y - 6, { size: 10, weight: 600, color: U.text });
-            ctx.globalAlpha = 1;
-            tag(ctx, dig, 10, y + 10, col, { align: 'left', a });
-          };
-          if (i) {
-            row(rowY[0], wide ? 'api:1.4.2' : '1.4.2', '1a2b', T.blue);
-            row(rowY[1], wide ? 'api:1.5.0, api:latest' : '1.5.0', '9f8e', T.gray, ease(t, PUSH, PUSH + 0.5));
-          } else row(rowY[0], 'api:latest', pushed ? '9f8e' : '1a2b', pushed ? T.orange : T.blue);
-          if (pushed) C.text(ctx, '새 이미지 푸시', 10, gy + gh - 10, { size: 9, weight: 600, color: T.orange[1] });
-          C.group(ctx, nx, gy, nw, gh, '노드', gy + 16);
-          const swapped = t >= SWAP, got = t >= SWAP + 1.2, newDig = i ? '1a2b' : '9f8e';
-          [0, 1, 2].forEach((j) => {
-            const b = { x: nx + 6, y: gy + 26 + j * 44, w: nw - 12, h: 38 }, fresh = j === 2 && swapped;
-            const name = fresh ? (wide ? '노드 4 (교체)' : '노드 4') : `노드 ${j + 1}`;
-            if (fresh && !got) return pod(ctx, b, name, '받는 중', T.gray, { dash: [4, 3], fill: U.plot });
-            const dig = fresh ? newDig : '1a2b';
-            pod(ctx, b, name, dig, dig === '1a2b' ? T.blue : T.red, { stroke: dig === '1a2b' ? U.grid : T.red[2] });
-          });
-          if (swapped && !got) tag(ctx, newDig, ...C.pathAt([[rw - 30, rowY[0] + 10], [nx + nw / 2, gy + 26 + 2 * 44 + 19]], ease(t, SWAP + 0.1, SWAP + 1.1)).pop(), i ? T.blue : T.red);
-          stampIf(ctx, w / 2, gy + gh + 20, i ? '모두 1a2b' : '같은 태그, 다른 코드', i ? 'ok' : 'bad', (run - SEC) / 0.4);
-          say(`${i ? '다이제스트 고정' : 'latest 태그'}. ${notes[i]}`);
-        },
-      });
-    });
-  }
 })();

@@ -1,4 +1,4 @@
-// GitOps post: push and pull, CI, manifest repo, ArgoCD sync and drift, App of Apps, ApplicationSet, Argo Rollouts.
+// GitOps post: push and pull, image tags and manifest repo, ArgoCD sync, App of Apps, canary.
 (() => {
   const U = hwa.ui, C = hwa.cv;
   const ease = (t, a, b) => hwa.smooth((t - a) / (b - a));
@@ -78,7 +78,7 @@
   // Push vs pull: who holds the cluster credentials, and what happens to a hand edit.
   scenes('gitops-push-pull', {
     height: 262, lens: [7, 8],
-    notes: ['push 방식: CI가 kubeconfig로 직접 적용한다. 손으로 바꾼 5는 Git과 다른 채 남는다.', 'pull 방식: 클러스터 안의 ArgoCD가 Git을 읽어 맞춘다. 손으로 바꾼 5를 찾아 3으로 되돌린다.'],
+    notes: ['push 방식: CI가 kubeconfig로 직접 적용한다. 손으로 바꾼 5는 Git과 다른 채 남는다.', 'pull 방식: 클러스터 안의 ArgoCD가 Git을 읽어 맞춘다. selfHeal을 켜 두면 손으로 바꾼 5를 3으로 되돌린다.'],
     draw: (ctx, w, h, i, t, say) => {
       const pull = i === 1, c0 = col(w, 0), c1 = col(w, 1), c2 = col(w, 2);
       C.pill(ctx, 0, 0, pull ? 'pull 방식' : 'push 방식', pull ? 'ok' : 'warn');
@@ -121,57 +121,6 @@
         C.stamp(ctx, w / 2, 242, 'Git 3, 클러스터 5', 'bad', (t - 4.8) / 0.4);
       }
       say(pull ? 'pull 방식: ArgoCD가 클러스터 안에서 Git을 읽는다. 운영자가 replicas를 5로 바꾸자 OutOfSync를 찾아 3으로 되돌린다.' : 'push 방식: CI가 kubeconfig로 클러스터에 적용한다. 운영자가 replicas를 5로 바꾸면 Git의 3과 다른 채 남는다.');
-    },
-  });
-
-  // Required checks: a PR reaches main only when every check passes.
-  const tick = (ctx, x, y, state, time) => {
-    ctx.beginPath();
-    if (state === 'run') {
-      ctx.arc(x, y, 6, time * 6, time * 6 + 4.2);
-      ctx.strokeStyle = U.blue; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
-      return;
-    }
-    ctx.arc(x, y, 7, 0, Math.PI * 2);
-    if (state === 'wait') { ctx.strokeStyle = '#cbd5e1'; ctx.stroke(); return; }
-    ctx.fillStyle = state === 'ok' ? '#22c55e' : U.red;
-    ctx.fill();
-    const m = state === 'ok' ? [[x - 3.5, y], [x - 1, y + 2.5], [x + 3.5, y - 2.5]] : [[x - 3, y - 3], [x + 3, y + 3]];
-    C.line(ctx, m, '#fff', 1.6);
-    if (state === 'bad') C.line(ctx, [[x + 3, y - 3], [x - 3, y + 3]], '#fff', 1.6);
-  };
-  scenes('gitops-ci-gate', {
-    height: 236, lens: [6.5, 6],
-    notes: ['검사 셋이 모두 통과하면 merge 버튼이 열리고 PR이 main에 들어간다.', 'test 하나가 실패하면 merge 버튼이 잠겨 PR이 main에 닿지 않는다.'],
-    draw: (ctx, w, h, i, t, say) => {
-      const fail = i === 1, c0 = col(w, 0), c1 = col(w, 1), c2 = col(w, 2);
-      C.pill(ctx, 0, 0, fail ? 'test 실패' : '검사 통과', fail ? 'bad' : 'ok');
-      const pr = box({ x: c0.x, y: 88, w: c0.w, h: 46, label: 'PR #42', s: 'feature' });
-      const G = box({ x: c1.X, y: 34, w: c1.cw, h: 154 });
-      const merge = box({ x: c2.x, y: 50, w: c2.w, h: 46, label: 'merge' });
-      const main = box({ x: c2.x, y: 140, w: c2.w, h: 46, label: 'main' });
-      groupBox(ctx, G.x, G.y, G.w, G.h, '필수 검사');
-      link(ctx, [pr.r, [G.x, pr.cy]]);
-      link(ctx, elbow([G.x + G.w, G.cy], merge.l));
-      link(ctx, [merge.b, main.t]);
-      node(ctx, pr);
-      const DONE = [2.0, 2.7, 3.4];
-      ['lint', 'test', 'build'].forEach((name, k) => {
-        const ry = 64 + k * 38, rx = G.x + 8, rw = G.w - 16;
-        const st = t < 1.1 ? 'wait' : t < DONE[k] ? 'run' : fail && k === 1 ? 'bad' : 'ok';
-        C.box(ctx, rx, ry, rw, 28, { fill: '#fff', stroke: st === 'bad' ? COL.bad[2] : U.grid, r: 6 });
-        tick(ctx, rx + 15, ry + 14, st, t);
-        C.text(ctx, name, rx + 29, ry + 14.5, { size: 11, weight: 600, color: U.text, base: 'middle' });
-        if (rw >= 150) C.text(ctx, { wait: '대기', run: '실행 중', ok: '통과', bad: '실패' }[st], rx + rw - 10, ry + 14.5, { size: 10, align: 'right', base: 'middle', color: st === 'bad' ? COL.bad[1] : U.muted });
-      });
-      const open = t >= 3.6;
-      node(ctx, merge, { s: open ? (fail ? '잠김' : '가능') : '검사 대기', tone: open ? (fail ? 'bad' : 'ok') : undefined, lit: open && !fail });
-      node(ctx, main, { s: !fail && t >= 5 ? 'PR #42 반영' : '', tone: !fail && t >= 5 ? 'ok' : undefined });
-      ride(ctx, [pr.r, [G.x, pr.cy]], t, 0.3, 1.1, 'PR', COL.blue);
-      ride(ctx, elbow([G.x + G.w, G.cy], merge.l), t, 3.5, 4.3, 'PR', fail ? COL.bad : COL.ok);
-      if (!fail) ride(ctx, [merge.b, main.t], t, 4.4, 5.0, 'PR', COL.ok);
-      C.stamp(ctx, w / 2, 214, fail ? 'merge 막힘' : 'main에 들어감', fail ? 'bad' : 'ok', (t - (fail ? 4.4 : 5.2)) / 0.4);
-      say(fail ? 'lint와 build는 통과했지만 test가 실패해 merge 버튼이 잠긴다.' : 'lint, test, build가 모두 통과해 merge 버튼이 열리고 PR이 main에 들어간다.');
     },
   });
 
@@ -264,59 +213,6 @@
     },
   });
 
-  // kustomize: the result is the base with the overlay's two lines written over it.
-  const OV = [
-    { env: 'dev', rep: 1, tag: '9b7c2e1' },
-    { env: 'prod', rep: 5, tag: '3f2a91c' },
-  ];
-  const code = (ctx, b, title, lines, { lit = -1, hl = [], a = [] } = {}) => {
-    C.box(ctx, b.x, b.y, b.w, b.h, { fill: '#fff', stroke: lit >= 0 ? U.accentLine : U.grid });
-    C.text(ctx, title, b.x + 10, b.y + 16, { size: 10, weight: 600, color: U.text });
-    lines.forEach((s, k) => {
-      const y = b.y + 30 + k * 18, al = a[k] === undefined ? 1 : a[k];
-      if (al <= 0) return;
-      ctx.globalAlpha = al;
-      if (hl[k]) { ctx.fillStyle = COL.blue[0]; ctx.fillRect(b.x + 4, y, b.w - 8, 16); }
-      ctx.font = MONO;
-      ctx.fillStyle = hl[k] ? COL.blue[1] : U.text;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(s, b.x + 10, y + 8.5);
-      ctx.globalAlpha = 1;
-    });
-  };
-  scenes('gitops-kustomize', {
-    height: 286, lens: [6, 6],
-    notes: ['dev: base의 replicas와 이미지 태그 두 줄만 overlay 값으로 바뀐다.', 'prod: 같은 base에서 replicas 5와 다른 태그가 들어간다. base는 한 벌이다.'],
-    draw: (ctx, w, h, i, t, say) => {
-      const o = OV[i], wide = w >= 560, BH = 108;
-      C.pill(ctx, 0, 0, `overlays/${o.env}`, 'info');
-      if (wide) C.text(ctx, 'kubectl kustomize 결과', w, 11, { size: 10, align: 'right', base: 'middle' });
-      let base, ov, out;
-      if (wide) {
-        const c0 = col(w, 0, 3, 24, 240), c1 = col(w, 1, 3, 24, 240), c2 = col(w, 2, 3, 24, 240);
-        base = box({ x: c0.x, y: 60, w: c0.w, h: BH }); ov = box({ x: c1.x, y: 60, w: c1.w, h: BH }); out = box({ x: c2.x, y: 60, w: c2.w, h: BH });
-        link(ctx, [base.r, ov.l]);
-        link(ctx, [ov.r, out.l]);
-      } else {
-        const hw = (w - 12) / 2;
-        base = box({ x: 0, y: 36, w: hw, h: BH }); ov = box({ x: hw + 12, y: 36, w: hw, h: BH }); out = box({ x: 0, y: 172, w, h: BH });
-        link(ctx, [base.b, [base.cx, out.y]]);
-        link(ctx, [ov.b, [ov.cx, out.y]]);
-      }
-      const rep = t >= 2.8, img = t >= 4.0;
-      code(ctx, base, 'base', ['kind: Deployment', 'replicas: 2', 'image: app', 'port: 8080'], { lit: t < 1.4 ? 0 : -1 });
-      code(ctx, ov, `overlays/${o.env}`, [`replicas: ${o.rep}`, `newTag: ${o.tag}`], { lit: t >= 1.6 && t < 4.2 ? 0 : -1, hl: [t >= 1.6 && t < 2.8, t >= 3.0 && t < 4.0] });
-      const lines = ['kind: Deployment', `replicas: ${rep ? o.rep : 2}`, `image: app${img ? `:${o.tag}` : ''}`, 'port: 8080'];
-      code(ctx, out, '결과', lines, { hl: [false, rep, img, false], a: [0, 1, 2, 3].map((k) => ease(t, 0.2 + k * 0.3, 0.5 + k * 0.3)) });
-      const line = (b, k) => [b.x + Math.min(b.w / 2, 80), b.y + 38 + k * 18];
-      ride(ctx, [line(ov, 0), line(out, 1)], t, 1.8, 2.8, `replicas: ${o.rep}`, COL.blue);
-      ride(ctx, [line(ov, 1), line(out, 2)], t, 3.0, 4.0, o.tag, COL.blue);
-      C.stamp(ctx, w / 2, wide ? 210 : 155, '바뀐 줄 2개', 'ok', (t - 4.4) / 0.4);
-      say(`overlays/${o.env}: base를 그대로 가져와 replicas를 ${o.rep}, 이미지 태그를 ${o.tag}로 바꾼 결과가 나온다.`);
-    },
-  });
-
   // Sync timing: a commit waits for the next poll (120s + up to 60s jitter), or a webhook refreshes at once.
   {
     const SPAN = 200, SEC = 6, LH = 44;
@@ -372,41 +268,6 @@
     });
   }
 
-  // Drift: a hand edit makes the app OutOfSync; selfHeal puts Git's value back.
-  demo('gitops-drift', {
-    height: 252, modes: ['selfHeal 끔', 'selfHeal 켬'], run: 'kubectl로 수정',
-    notes: ['selfHeal 끔: 차이를 OutOfSync로 표시만 하고, 파드는 5개로 남는다.', 'selfHeal 켬: 몇 초 안에 Git의 replicas 3으로 되돌린다.'],
-    draw: (ctx, w, h, mode, t, say) => {
-      const heal = mode === 1, c0 = col(w, 0), c1 = col(w, 1), c2 = col(w, 2);
-      C.pill(ctx, 0, 0, heal ? 'selfHeal 켬' : 'selfHeal 끔', heal ? 'ok' : 'warn');
-      const git = box({ x: c0.x, y: 62, w: c0.w, h: 50, label: 'Git', s: 'replicas: 3' });
-      const argo = box({ x: c1.x, y: 62, w: c1.w, h: 50, label: 'ArgoCD' });
-      const op = box({ x: c1.x, y: 154, w: c1.w, h: 46, label: '운영자', s: 'kubectl scale' });
-      const G = { x: c2.X, y: 40, w: c2.cw, h: 176 };
-      const dep = box({ x: G.x + 8, y: 64, w: G.w - 16, h: 46, label: 'Deployment' });
-      const edited = t >= 1.3 && !(heal && t >= 3.6), seen = t >= 1.8 && !(heal && t >= 3.6), n = edited ? 5 : 3;
-      const pw = Math.min(12, (dep.w - 16) / 5), pdx = dep.cx - (5 * pw + 16) / 2, py = 140;
-      groupBox(ctx, G.x, G.y, G.w, G.h, '클러스터');
-      link(ctx, [git.r, argo.l]);
-      link(ctx, elbow(argo.r, dep.l));
-      const opPath = [op.r, [G.x - 6, op.cy], [G.x - 6, py + 6], [pdx - 2, py + 6]];
-      link(ctx, opPath);
-      node(ctx, git);
-      node(ctx, op);
-      node(ctx, argo, { s: seen ? 'OutOfSync' : 'Synced', tone: seen ? 'warn' : 'ok', lit: seen });
-      node(ctx, dep, { s: `replicas: ${n}`, tone: edited ? 'warn' : undefined });
-      pods(ctx, pdx, py, [0, 1, 2, 3, 4].map((k) => (k < 3 ? POD.v2 : k < n ? POD.new : null)), pw);
-      C.text(ctx, `파드 ${n}개`, G.x + G.w / 2, py + 34, { size: 11, weight: 700, color: edited ? COL.warn[1] : U.text, align: 'center' });
-      if (t < 0) { hint(ctx, 'kubectl로 수정', w / 2, 236); say(`${heal ? 'selfHeal 켬' : 'selfHeal 끔'}. kubectl로 replicas를 바꾼 뒤 파드 수를 본다.`); return; }
-      ride(ctx, opPath, t, 0.3, 1.3, 'scale 5', COL.warn);
-      if (heal) {
-        ride(ctx, elbow(argo.r, dep.l), t, 2.6, 3.6, 'replicas: 3', COL.ok);
-        C.stamp(ctx, w / 2, 234, 'Git 값 3으로 되돌림', 'ok', (t - 4) / 0.4);
-      } else C.stamp(ctx, w / 2, 234, 'OutOfSync로 남음', 'warn', (t - 3) / 0.4);
-      say(heal ? 'selfHeal 켬: 운영자가 5로 바꾸자 ArgoCD가 OutOfSync를 찾아 Git의 3으로 되돌린다.' : 'selfHeal 끔: 운영자가 5로 바꾸면 ArgoCD는 OutOfSync로 표시만 하고 파드는 5개로 남는다.');
-    },
-  });
-
   // App of Apps: the root Application reads apps/ and creates one child Application per file.
   {
     const NAMES = ['bookinfo', 'istio-base', 'istiod', 'todo-api'];
@@ -452,34 +313,6 @@
     });
   }
 
-  // ApplicationSet: the cluster generator stamps one Application per cluster whose label matches.
-  {
-    const CL = [['prod-1', 'prod'], ['prod-2', 'prod'], ['dev-1', 'dev'], ['prod-3', 'prod']];
-    scenes('gitops-appset', {
-      height: 262, lens: [6.5, 6],
-      notes: ['env: prod 라벨이 붙은 클러스터마다 Application이 생긴다. dev-1에는 생기지 않는다.', 'prod 라벨을 단 클러스터를 등록하면 Application이 저절로 하나 더 생긴다.'],
-      draw: (ctx, w, h, i, t, say) => {
-        const add = i === 1, c0 = col(w, 0), c1 = col(w, 1), c2 = col(w, 2);
-        C.pill(ctx, 0, 0, add ? '클러스터 추가' : 'cluster generator', add ? 'ok' : 'info');
-        const set = box({ x: c0.x, y: 92, w: c0.w, h: 56, label: 'ApplicationSet', s: 'env: prod', size: 11 });
-        node(ctx, set, { tone: 'blue', lit: add ? t > 1.4 && t < 2.6 : t > 0.3 && t < 3.6 });
-        CL.forEach(([name, env], k) => {
-          if (k === 3 && !add) return;
-          const y = 40 + k * 46, cl = box({ x: c2.x, y, w: c2.w, h: 38, label: name }), ap = box({ x: c1.x, y, w: c1.w, h: 38, label: `app-${name}` });
-          const match = env === 'prod', picked = add ? (k < 3 || t >= 1.4) : t >= 0.5 + k * 0.3;
-          const pi = [0, 1, -1, 2][k], born = add ? (k < 3 ? -1 : 2.6) : 2.4 + pi * 0.8;
-          node(ctx, cl, { s: `env: ${env}`, tone: picked ? (match ? 'ok' : undefined) : undefined, dim: picked && !match, a: k === 3 ? ease(t, 0.4, 1.0) : 1 });
-          if (!match) { if (t >= 3.4 || add) C.text(ctx, '라벨 다름', ap.cx, ap.cy + 0.5, { size: 10, align: 'center', base: 'middle' }); return; }
-          if (t >= born) { link(ctx, elbow(set.r, ap.l)); link(ctx, [ap.r, cl.l]); }
-          node(ctx, ap, { a: ease(t, born, born + 0.3), size: 11 });
-          if (born > 0) ride(ctx, elbow(set.r, ap.l), t, born - 0.8, born, 'app', COL.blue);
-        });
-        C.stamp(ctx, w / 2, 242, add ? 'app-prod-3 자동 생성' : 'prod 클러스터만', 'ok', (t - (add ? 3.6 : 4.4)) / 0.4);
-        say(add ? 'env: prod 라벨을 단 prod-3 클러스터를 등록하자 app-prod-3 Application이 저절로 생긴다.' : 'cluster generator가 env: prod 라벨이 붙은 prod-1, prod-2에만 Application을 만들고 dev-1은 건너뛴다.');
-      },
-    });
-  }
-
   // Canary vs rolling: share of requests hitting a buggy version over 10 minutes. Times are illustrative.
   demo('gitops-canary', {
     height: 250, modes: ['롤링 업데이트', '카나리'], run: '버그 있는 버전 배포',
@@ -508,53 +341,4 @@
       say(canary ? '카나리: 새 버전에 10%만 보내고 기다리다 3분에 분석이 실패해 중단한다. 에러는 10% 안에서 끝난다.' : '롤링 업데이트: 배포 2분 뒤 모든 파드가 새 버전이 되어 요청 100%가 에러를 받는다.');
     },
   });
-
-  // Blue-green: preview first, then the active Service flips to v2, and flips back while v1 is still up.
-  {
-    const SW = [null, 1.6, 2.4];
-    scenes('gitops-bluegreen', {
-      height: 256, lens: [5.5, 6, 6.5],
-      notes: ['preview 서비스로 v2를 먼저 확인한다. 운영 트래픽은 아직 v1로 간다.', '승격하면 active 서비스가 v2를 가리켜 트래픽이 한 번에 넘어간다.', 'v2에 문제가 보이면 아직 떠 있는 v1로 active를 되돌린다.'],
-      draw: (ctx, w, h, i, t, say) => {
-        const c0 = col(w, 0), c1 = col(w, 1), c2 = col(w, 2);
-        const P = [['미리보기', 'info'], ['승격', 'ok'], ['되돌리기', 'warn']][i];
-        C.pill(ctx, 0, 0, P[0], P[1]);
-        const user = box({ x: c0.x, y: 52, w: c0.w, h: 44, label: '사용자' });
-        const qa = box({ x: c0.x, y: 152, w: c0.w, h: 44, label: '확인용', s: 'QA' });
-        const act = box({ x: c1.x, y: 52, w: c1.w, h: 44, label: 'active', s: 'Service' });
-        const pre = box({ x: c1.x, y: 152, w: c1.w, h: 44, label: 'preview', s: 'Service' });
-        const v1 = box({ x: c2.x, y: 42, w: c2.w, h: 64 }), v2 = box({ x: c2.x, y: 142, w: c2.w, h: 64 });
-        const target = (x) => (i === 0 ? v1 : i === 1 ? (x < SW[1] ? v1 : v2) : x < SW[2] ? v2 : v1);
-        const tgt = target(t), bad = i === 2 && t >= 1.0;
-        link(ctx, [user.r, act.l]);
-        link(ctx, [qa.r, pre.l]);
-        link(ctx, elbow(act.r, tgt.l), U.blue);
-        link(ctx, [pre.r, v2.l], U.purple);
-        // Request dots: each picks its target from the selector at the moment it reaches the active Service.
-        const dots = (gap, life, path, color) => {
-          for (let b = Math.floor((t - life) / gap) * gap; b <= t; b += gap) {
-            const k = (t - b) / life;
-            if (k < 0 || k > 1) continue;
-            const [pts, c] = path(b);
-            const [x, y] = C.pathAt(pts, k).pop();
-            ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
-          }
-        };
-        dots(0.35, 1.4, (b) => { const g = target(b + 0.7); return [[user.r, act.l, ...elbow(act.r, g.l)], g === v2 && i === 2 && b + 1.4 >= 1.0 ? U.red : U.blue]; }, U.blue);
-        dots(0.8, 1.4, () => [[qa.r, pre.l, pre.r, v2.l], U.purple]);
-        [user, qa, act, pre].forEach((b) => node(ctx, b, { lit: b === act && SW[i] !== null && Math.abs(t - SW[i]) < 0.5 }));
-        [[v1, 'v1', POD.v1], [v2, 'v2', bad ? POD.bad : POD.v2]].forEach(([b, name, c]) => {
-          C.box(ctx, b.x, b.y, b.w, b.h, { fill: '#fff', stroke: b === tgt ? COL.blue[2] : U.grid });
-          C.text(ctx, `ReplicaSet ${name}`, b.x + 8, b.y + 16, { size: b.w < 110 ? 10 : 11, weight: 600, color: U.text });
-          pods(ctx, b.x + 8, b.y + 30, [c, c, c], 14);
-        });
-        const s1 = i === 1 && t >= SW[1] ? '30초 뒤 정리' : i === 2 ? (t >= SW[2] ? 'active' : '아직 떠 있음') : 'active';
-        C.text(ctx, s1, v1.x + v1.w - 8, v1.y + v1.h - 10, { size: 10, weight: 600, color: s1 === 'active' ? COL.blue[1] : COL.warn[1], align: 'right' });
-        if (bad) C.text(ctx, '에러', v2.x + v2.w - 8, v2.y + v2.h - 10, { size: 10, weight: 600, color: U.red, align: 'right' });
-        const st = [['v2는 preview로만', 'info', 3.4], ['한 번에 넘김', 'ok', 2.6], ['바로 v1로', 'warn', 3.4]][i];
-        C.stamp(ctx, w / 2, 234, st[0], st[1], (t - st[2]) / 0.4);
-        say(['미리보기: 사용자 요청은 active를 거쳐 v1로, 확인용 요청은 preview를 거쳐 v2로 간다.', '승격: active가 v2를 가리키자 사용자 요청이 한 번에 v2로 넘어간다. v1은 30초 뒤 정리된다.', '되돌리기: v2에서 에러가 나자 아직 떠 있는 v1로 active를 되돌린다.'][i]);
-      },
-    });
-  }
 })();
