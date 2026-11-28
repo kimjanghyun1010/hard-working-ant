@@ -295,30 +295,9 @@
       });
     });
 
-    // Figure 3. Hyper-threading: the execution unit idles during memory waits; a second thread fills them.
-    const htA = [[0, 0, 30, 'cpu', '계산'], [0, 90, 120, 'cpu', '계산'], [0, 180, 200, 'cpu', '']];
-    const htAw = [[0, 30, 90, 'wait', '메모리 대기'], [0, 120, 180, 'wait', '메모리 대기']];
-    tl('cpu-ht', [
-      { pill: '하이퍼스레딩 끔', tone: 'warn', span: 200, lanes: ['스레드 A', '실행 장치'], segs: [...htA, [1, 0, 30, 'cpu', 'A'], [1, 90, 120, 'cpu', 'A'], [1, 180, 200, 'cpu', '']], arcs: [...htAw, [1, 30, 90, 'idle', 'IDLE'], [1, 120, 180, 'idle', 'IDLE']], stamp: ['실행 장치 IDLE 60%', 'warn'], say: 'A가 메모리를 기다리는 동안 실행 장치가 논다.' },
-      { pill: '하이퍼스레딩 켬', tone: 'ok', span: 200, lanes: ['스레드 A', '스레드 B', '실행 장치'], segs: [...htA, [1, 30, 60, 'cpu2', '계산'], [1, 120, 150, 'cpu2', '계산'], [2, 0, 30, 'cpu', 'A'], [2, 30, 60, 'cpu2', 'B'], [2, 90, 120, 'cpu', 'A'], [2, 120, 150, 'cpu2', 'B'], [2, 180, 200, 'cpu', '']], arcs: [...htAw, [1, 0, 30, 'wait', ''], [1, 60, 120, 'wait', '메모리 대기'], [1, 150, 200, 'wait', ''], [2, 60, 90, 'idle', 'IDLE'], [2, 150, 180, 'idle', 'IDLE']], stamp: ['IDLE 30%로 줄어듦', 'ok'], say: 'A가 기다리는 동안 B가 계산해서 실행 장치가 덜 논다.' },
-      { pill: '계산만 하는 일', tone: 'bad', span: 200, lanes: ['스레드 A', '스레드 B', '실행 장치'], segs: [[0, 0, 40, 'cpu', '계산'], [0, 80, 120, 'cpu', '계산'], [0, 160, 200, 'cpu', '계산'], [1, 40, 80, 'cpu2', '계산'], [1, 120, 160, 'cpu2', '계산'], [2, 0, 40, 'cpu', 'A'], [2, 40, 80, 'cpu2', 'B'], [2, 80, 120, 'cpu', 'A'], [2, 120, 160, 'cpu2', 'B'], [2, 160, 200, 'cpu', 'A']], arcs: [[0, 40, 80, 'late', '차례 대기'], [0, 120, 160, 'late', '차례 대기'], [1, 0, 40, 'late', '차례 대기'], [1, 80, 120, 'late', '차례 대기'], [1, 160, 200, 'late', '']], stamp: ['둘 다 절반씩 대기', 'bad'], say: '둘 다 계산만 하면 실행 장치 하나를 두고 번갈아 기다린다.' },
-    ]);
-
     // Figure 4. One request: a little CPU at each end, a long wait for the DB in between.
     tl('cpu-os-threads', [
       { pill: '요청 하나', tone: 'info', span: 100, lanes: ['스레드', 'DB'], ticks: [[50, '50ms'], [100, '100ms']], segs: [[0, 0, 6, 'cpu', '읽기'], [1, 10, 80, 'db', '쿼리 실행'], [0, 88, 96, 'cpu', '응답']], arcs: [[0, 6, 88, 'wait', 'DB 응답 대기']], event: [10, '쿼리 보냄'], stamp: ['CPU 14ms, 대기 82ms', 'info'], say: '스레드는 처음과 끝에만 CPU를 쓰고 나머지는 DB를 기다린다.' },
-    ], { SEC: 6 });
-
-    // Figure 5. Context switches: each switch costs a slice; switching often spends more of the vCPU on switching.
-    const sw = (len) => { const out = []; for (let x = 0, j = 0; x < 120; x += len + 4, j++) { out.push([0, x, Math.min(120, x + len), j % 2 ? 'cpu2' : 'cpu', j % 2 ? 'B' : 'A']); if (x + len < 120) out.push([0, x + len, Math.min(120, x + len + 4), 'sw', '']); } return out; };
-    tl('cpu-switch', [
-      { pill: '드물게 바꿈, 전환 10%', tone: 'ok', span: 120, lanes: ['vCPU'], legend: [['cpu', 'A'], ['cpu2', 'B'], ['sw', '전환']], segs: sw(36), stamp: ['전환 10%', 'ok'], say: '작업을 드물게 바꾸면 40 중 4만 전환에 쓴다.' },
-      { pill: '자주 바꿈, 전환 33%', tone: 'bad', span: 120, lanes: ['vCPU'], legend: [['cpu', 'A'], ['cpu2', 'B'], ['sw', '전환']], segs: sw(8), stamp: ['전환 33%', 'bad'], say: '자주 바꾸면 12 중 4를 전환에 써서, 같은 시간에 하는 일이 줄어든다.' },
-    ]);
-
-    // Figure 7. CPU usage: time spent working in one second.
-    tl('cpu-usage', [
-      { pill: '1초 중 500ms 일함, 사용률 50%', tone: 'info', span: 1000, lanes: ['CPU 하나'], ticks: [[500, '500ms'], [1000, '1초']], segs: [[0, 0, 150, 'cpu', '150ms'], [0, 300, 480, 'cpu', '180ms'], [0, 650, 820, 'cpu', '170ms']], arcs: [[0, 150, 300, 'idle', 'IDLE'], [0, 480, 650, 'idle', 'IDLE'], [0, 820, 1000, 'idle', 'IDLE']], stamp: ['500ms / 1초 = 50%', 'info'], say: '일한 시간을 더해 1초로 나눈 값이 사용률이다.' },
     ], { SEC: 6 });
 
     // Figure 17. Node.js under limit 1000m: the JS thread and the V8 helper spend one quota together.
@@ -334,25 +313,12 @@
       { pill: '쪼개서 계산', tone: 'ok', span: 60, lanes: ['메인 스레드', '요청 B'], ticks: [[20, '20ms'], [40, '40ms'], [60, '60ms']], segs: [...chunks, [0, 5, 8, 'cpu2', 'B']], arcs: [[1, 3, 5, 'wait', '']], event: [3, 'B 도착'], stamp: ['B 2ms 대기', 'ok'], say: 'A를 5ms씩 나눠 사이마다 메인 스레드를 놓아 주면, B는 2ms만 기다린다. A가 끝나는 시각은 거의 같다.' },
     ], { demo: { modes: ['통째로 계산', '쪼개서 계산'], run: '무거운 요청 보내기' } });
 
-    // Demo: converting a big response to JSON holds the vCPU while B waits. Times are rough, for shape.
-    tl('cpu-serialize', [
-      { pill: '응답 10KB', tone: 'ok', span: 40, lanes: ['vCPU', '요청 B'], ticks: [[20, '20ms'], [40, '40ms']], segs: [[0, 0, 1, 'cpu', ''], [0, 2, 3, 'cpu2', ''], [0, 8, 9, 'cpu', ''], [0, 14, 15, 'cpu2', '']], event: [2, 'B 도착'], stamp: ['B 바로 처리', 'ok'], say: '10KB 응답은 JSON 변환이 1ms 안에 끝나 B가 바로 처리된다.' },
-      { pill: '응답 5MB', tone: 'bad', span: 40, lanes: ['vCPU', '요청 B'], ticks: [[20, '20ms'], [40, '40ms']], segs: [[0, 0, 32, 'cpu', 'A JSON 변환'], [0, 32, 34, 'cpu2', 'B']], arcs: [[1, 2, 32, 'late', 'B 대기']], event: [2, 'B 도착'], stamp: ['B 30ms 대기', 'bad'], say: '5MB 응답을 JSON으로 바꾸는 32ms 동안 vCPU를 잡아, 2ms에 온 B가 30ms를 기다린다. 시간은 대략값이다.' },
-    ], { demo: { modes: ['응답 10KB', '응답 5MB'], run: '요청 보내기' } });
-
     // Demo: a burst under limit 1000m stops at the quota and finishes in the next period; without a limit it just runs.
     const per = [[0, 100, '주기'], [100, 200, '주기'], [200, 300, '주기']], bt = [[100, '100ms'], [200, '200ms'], [300, '300ms']];
     tl('cpu-burst', [
       { pill: 'limit 1000m', tone: 'bad', span: 300, lanes: ['작업 1', '작업 2'], ticks: bt, below: per, segs: [[0, 0, 20, 'cpu', ''], [0, 100, 150, 'cpu', '50ms'], [1, 100, 150, 'cpu2', '50ms'], [0, 200, 230, 'cpu', ''], [1, 200, 230, 'cpu2', '']], arcs: [[0, 150, 200, 'thr', '쓰로틀'], [1, 150, 200, 'thr', '쓰로틀']], event: [100, '요청 몰림'], stamp: ['130ms 만에 끝남', 'bad'], say: '몰린 일을 두 작업이 나눠 50ms 만에 쿼터를 다 쓰고, 50ms 멈췄다가 다음 주기에 마저 끝낸다.' },
       { pill: 'limit 없음', tone: 'ok', span: 300, lanes: ['작업 1', '작업 2'], ticks: bt, below: per, segs: [[0, 0, 20, 'cpu', ''], [0, 100, 180, 'cpu', '80ms'], [1, 100, 180, 'cpu2', '80ms']], event: [100, '요청 몰림'], stamp: ['80ms 만에 끝남', 'ok'], say: '쿼터가 없으면 두 작업이 80ms 동안 쉬지 않고 돌아 같은 일을 80ms에 끝낸다.' },
     ], { demo: { modes: ['limit 1000m', 'limit 없음'], run: '요청 몰리게 하기' } });
-    // Short requests leave the vCPU idle between them; streams split it.
-    const shortReq = Array.from({ length: 10 }, (_, j) => [0, j * 10 + 2, j * 10 + 4, j % 2 ? 'cpu2' : 'cpu', '']);
-    const streams = Array.from({ length: 10 }, (_, j) => [0, j * 10, j * 10 + 10, `s${(j % 4) + 1}`, `${(j % 4) + 1}`]);
-    tl('cpu-threads', [
-      { pill: '짧은 요청', tone: 'ok', span: 100, lanes: ['vCPU'], ticks: [[50, '50ms'], [100, '100ms']], segs: shortReq, stamp: ['vCPU 80% IDLE', 'ok'], say: '짧은 요청은 하나에 2ms만 쓰고 나머지는 비어 있어, 스레드를 많이 둬도 잘 돈다.' },
-      { pill: '스트림 4개', tone: 'bad', span: 100, lanes: ['vCPU'], ticks: [[50, '50ms'], [100, '100ms']], legend: [['s1', '1'], ['s2', '2'], ['s3', '3'], ['s4', '4']], segs: streams, stamp: ['하나당 25%', 'bad'], say: '스트림은 CPU를 놓지 않아 넷이 번갈아 쓰면 하나당 25%만 쓴다.' },
-    ]);
   }
 
   // Node.js process: main thread, kernel, libuv pool and V8 helpers. Each scene traces one job through them.

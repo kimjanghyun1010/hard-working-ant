@@ -1,270 +1,86 @@
 ---
 title: CPU 이해하기
-description: CPU가 시간을 나눠 쓰는 방식부터 쿠버네티스 request와 limit, Node.js가 CPU를 쓰는 방식까지 정리했다.
+description: 쿠버네티스에서 CPU가 남는데도 서버가 느려지는 이유를 스케줄러, request와 limit, Node.js의 CPU 사용 방식으로 따라간다.
 date: 2026-10-25 12:00:00 +0900
 series: Back to the Basic
 tags: [cpu, kubernetes, cgroup, linux, nodejs]
-scripts: [figures/cpu.js, figures/cpu-structure.js, figures/cpu-flow.js]
+scripts: [figures/cpu.js]
 ---
 
-## CPU 기본 구조
+## CPU 시간과 기다림
 
-CPU는 프로그램의 명령을 하나씩 실행하는 장치다. 1초에 수십억 번 아래 네 단계를 반복한다.
-
-1. 메모리에서 명령을 가져온다.
-2. 무슨 명령인지 해석한다.
-3. 실행한다.
-4. 결과를 적는다.
-
-CPU를 밭에서 일하는 일꾼으로 보면 부품의 역할을 잡기 쉽다.
+CPU는 메모리에서 명령을 가져와 해석하고, 실행하고, 결과를 적는 일을 1초에 수십억 번 반복한다. 부품의 역할은 밭에서 일하는 일꾼으로 보면 잡기 쉽다.
 
 | 부품 | 하는 일 | 비유 |
 |---|---|---|
 | 코어 | 명령을 실행하는 단위. CPU 하나에 여러 개 있다 | 일꾼 |
 | 실행 장치 | 더하기, 비교 같은 실제 계산을 한다 | 일꾼의 몸 |
-| 레지스터 | 지금 계산 중인 값과 다음에 실행할 명령의 위치를 담는 작은 칸 | 지금 손에 쥔 것 |
-| L1, L2 캐시 | 자주 쓰는 메모리 내용을 코어 가까이에 복사해 둔다 | 일꾼이 멘 가방 |
-| L3 캐시 | 코어들이 같이 쓰는 캐시 | 일꾼들이 같이 쓰는 밭 옆 선반 |
+| 레지스터 | 지금 계산 중인 값을 담는 작은 칸 | 지금 손에 쥔 것 |
+| L1, L2, L3 캐시 | 자주 쓰는 메모리 내용을 코어 가까이에 복사해 둔다 | 가방과 밭 옆 선반 |
+| 메모리 | 실행 중인 프로그램과 데이터가 올라와 있는 곳 | 밭에 대 둔 수레 |
 
-CPU는 메모리에 올라온 명령과 데이터만 바로 다룬다. 디스크나 네트워크의 데이터는 먼저 메모리로 가져와야 하고, 멀리 있을수록 오래 걸린다. 아래 그림에서 데이터가 멀어질수록 왕복 시간이 얼마나 느는지 살펴보자.
+CPU는 계산보다 **기다리는 시간**이 길다. 레지스터에서 값을 꺼내는 데 0.2ns가 걸린다면 메모리는 약 100ns, SSD는 100µs, 다른 서버는 0.1~0.5ms가 걸린다. 레지스터를 1초로 늘려 보면 메모리는 8분, 다른 서버는 일주일에서 한 달 거리다(널리 쓰이는 대략값, 같은 데이터센터 안 기준).
 
-<figure class="fig" data-figure="cpu-memory">
-  <figcaption>데이터가 있는 곳과 레지스터에서 다녀오는 시간</figcaption>
-</figure>
+쿠버네티스와 클라우드가 말하는 vCPU는 리눅스가 CPU 하나로 보는 실행 자리다. 코어 하나에 하드웨어 스레드 둘을 두는 하이퍼스레딩(hyper-threading)을 켜면 코어 16개가 vCPU 32개가 되고, 같은 코어의 두 vCPU는 실행 장치를 나눠 쓴다.
 
-| 이름 | 위치 | 크기 (보통) | 왕복 시간 (대략) | 비유 |
-|---|---|---|---|---|
-| 레지스터 | 코어 안 | 아주 작다 | 0.2ns 정도 | 손에 쥔 것 |
-| L1 캐시 | 코어마다 하나 | 수십 KB | 약 1ns | 가방 앞주머니 |
-| L2 캐시 | 코어마다 하나 | 수백 KB에서 몇 MB | 약 4ns | 가방 안 |
-| L3 캐시 | 칩 안, 코어들이 같이 씀 | 수 MB에서 수십 MB | 약 15ns | 밭 옆 선반 |
-| 메모리 | 메인보드 슬롯 (DDR) | 수십 GB | 약 100ns | 밭에 대 둔 수레 |
-| SSD | PCIe 슬롯 (NVMe) | 수 TB | 수십에서 100µs | 창고 |
-| 다른 서버 | 랜카드와 스위치 너머 | | 0.1에서 0.5ms | 다른 마을의 창고 |
-
-크기와 시간은 흔히 쓰는 대략값이라 CPU와 장비마다 다르다.
-
-레지스터를 1초로 늘려 보면 메모리는 약 8분, SSD는 6일, 다른 서버는 일주일에서 한 달 거리다. 그래서 CPU는 계산하는 시간보다 **데이터를 기다리는 시간**이 더 길 때가 많다.
-
-## CPU 정보 확인
-
-서버에 vCPU가 몇 개인지는 `lscpu`로 본다.
-
-<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ lscpu
-Architecture:             x86_64
-<strong>CPU(s):                   32</strong>
-  On-line CPU(s) list:    0-31
-Vendor ID:                GenuineIntel
-  Model name:             Intel(R) Xeon(R) Silver 4314 CPU @ 2.40GHz
-    <strong>Thread(s) per core:   2</strong>
-    <strong>Core(s) per socket:   16</strong>
-    <strong>Socket(s):            1</strong>
-</code></pre></div></div>
-
-| 항목 | 값 | 뜻 | 흔히 부르는 말 |
-|---|---|---|---|
-| CPU(s) | 32 | 리눅스 스케줄러가 보는 논리 CPU 수 | 논리 프로세서, 논리 스레드, vCPU |
-| Thread(s) per core | 2 | 코어 하나가 받는 하드웨어 스레드 수 (하이퍼스레딩) | |
-| Core(s) per socket | 16 | 소켓 하나에 든 물리 코어 수 | 코어 수, 물리 프로세서 |
-| Socket(s) | 1 | 메인보드에 꽂힌 물리 CPU 수 | |
-
-CPU(s) 32는 소켓 1개, 코어 16개, 코어마다 하드웨어 스레드 2개를 곱한 값이다. 아래 그림이 이 곱셈을 차례로 쌓는다.
-
-<figure class="fig" data-figure="cpu-count">
-  <figcaption>lscpu 숫자가 만들어지는 순서</figcaption>
-</figure>
-
-## 하이퍼스레딩
-
-vCPU 32개 서버에서 계산만 하는 작업을 32개 돌려도, 16개일 때보다 크게 빨라지지 않는 경우가 있다. vCPU 둘이 실행 장치 하나를 나눠 쓰기 때문이다.
-
-CPU는 명령 하나를 1ns보다 짧게 처리하지만, 메모리에서 데이터를 가져오는 데는 약 100ns가 걸린다. 그동안 실행 장치는 멈춰서 기다린다(stall). 하이퍼스레딩(hyper-threading)은 코어 하나에 vCPU를 두 개 두고, 한쪽이 기다리는 동안 다른 쪽이 계산하게 한다.
-
-세 장면에서 맨 아래 실행 장치 줄이 얼마나 차는지 지켜보자.
-
-<figure class="fig" data-figure="cpu-ht">
-  <figcaption>하이퍼스레딩 끔, 켬, 계산만 하는 일에서 코어 하나의 실행 장치</figcaption>
-</figure>
-
-끄면 메모리를 기다리는 동안 실행 장치가 논다. 켜면 B가 그 틈을 채우지만, 계산만 하는 일에서는 채울 틈이 없어 둘이 번갈아 기다린다. 앞의 lscpu 서버도 vCPU는 32개지만 완전한 병렬은 코어 수인 16까지다.
-
-- 이득이 큰 시스템: 연산은 적고 요청이 많은 웹 서버, API 서버, DB. 메모리를 기다리는 시간이 많다.
-- 손해일 수 있는 시스템: 연산이 큰 압축, 인코딩, 수치 계산. 메모리를 기다리는 시간이 거의 없어서, 내부적으로는 자원 경합으로 stall이 늘어난다.
-
-## 스레드와 요청
-
-API 서버 하나가 OS 스레드를 200개 띄우고도 vCPU 4개로 잘 돈다. 스레드 대부분이 CPU를 쓰지 않고 기다리고 있기 때문이다.
-
-같은 "스레드"라는 이름을 쓰지만 vCPU와 OS 스레드는 다른 것이다.
-
-| 구분 | 뜻 | 수 |
-|---|---|---|
-| 논리 스레드 (vCPU) | OS가 CPU 하나로 보는 단위. 한 번에 스레드 하나를 실행한다 | 하드웨어가 정한다 (예: 32) |
-| OS 스레드 | 커널이 스케줄링하는 실행 단위. 요청을 처리한 뒤에도 남아 다음 요청을 받는다 | 수백에서 수만 |
-| 요청 | 클라이언트가 보낸 작업 한 건 | 계속 들어온다 |
-
-요청 하나를 시간축에 펼쳐 보자. 스레드가 CPU를 쓰는 구간이 얼마나 짧은지 보인다.
+vCPU는 한 번에 OS 스레드 하나를 실행한다. 그래도 vCPU 4개 서버에서 스레드 200개가 잘 도는 것은, 스레드 대부분이 DB나 디스크 응답을 기다리며 CPU에서 내려가 있기 때문이다.
 
 <figure class="fig" data-figure="cpu-os-threads">
   <figcaption>요청 하나가 CPU를 쓰는 시간과 DB를 기다리는 시간</figcaption>
 </figure>
 
-100ms짜리 요청에서 CPU를 쓰는 건 처음과 끝의 십여 ms뿐이고, 나머지는 DB 응답 대기다. 그래서 vCPU 32개로 OS 스레드 수천 개를 돌릴 수 있다.
+그림의 예에서 100ms 걸린 API 요청이 CPU를 쓴 시간은 처음과 끝의 십여 ms뿐이다. API 서버가 CPU 때문에 느려지는 경우는 대개 이 십여 ms 동안 CPU를 바로 받지 못할 때이고, 그 순간은 스케줄러와 쿼터가 정한다.
 
-동기 방식은 스레드 하나가 한 가지를, 비동기 방식은 여러 가지를 한꺼번에 기다린다.
+## 스케줄러와 쿼터
 
-## 스레드 스케줄링
+실행할 스레드가 vCPU보다 많으면 커널이 번갈아 돌린다. 스레드를 바꿀 때는 레지스터 값을 저장하고 다음 스레드 값을 불러오는데, 이 컨텍스트 스위칭(context switching)은 한 번에 수 µs이고, 바뀐 스레드는 캐시가 비어 한동안 느리게 돈다. 계산하는 스레드를 vCPU보다 많이 띄우면 일보다 바꾸는 데 시간을 쓰는 이유다.
 
-### 컨텍스트 스위칭
+누구를 다음에 돌릴지는 커널 스케줄러가 정한다. 리눅스는 오랫동안 CFS(Completely Fair Scheduler)를 썼고, 커널 6.6부터 EEVDF(Earliest Eligible Virtual Deadline First)로 바뀌었다. 둘 다 스레드마다 가상 실행 시간을 쌓아 덜 쌓인 쪽에 먼저 차례를 준다.
 
-vCPU 하나는 한 번에 스레드 하나만 돌린다. 돌리던 스레드를 내리고 다른 스레드를 올리는 걸 컨텍스트 스위칭(context switching)이라고 한다.
+가상 실행 시간은 실제로 쓴 시간을 weight(가중치)로 나눠 쌓는다. weight가 두 배인 스레드는 시간이 절반 속도로 쌓여서 차례를 두 배 자주 받는다. EEVDF는 여기에 스레드마다 이번 차례를 끝낼 가상 마감 시각을 두고, 마감이 가장 이른 스레드부터 돌린다.
 
-- 내릴 때: 그 스레드가 어디까지 했는지(레지스터 값)를 메모리에 저장한다.
-- 올릴 때: 다음 스레드가 저장해 둔 값을 꺼내 CPU에 싣는다.
+한 번에 주는 시간(기본 조각)은 CPU 수에 따라 늘어난다.
 
-스위칭은 두 가지 경우에 일어난다.
+- 기본 조각: 0.75ms (최신 커널은 0.7ms)
+- 배수: 1 + log2(CPU 수). CPU 수는 8에서 멈추므로 최대 4
+- 결과: 8코어 이상이면 약 3ms
 
-- 자발적 스위칭: 디스크, 네트워크, 락을 기다리느라 스스로 CPU를 내려놓는 경우
-- 강제 스위칭: 실행할 일이 남았는데 할당 시간이 끝나 CPU를 내주는 경우
+실행할 스레드가 vCPU보다 많으면 각 스레드는 이 간격으로 번갈아 돈다.
 
-저장하고 꺼내는 동안 CPU는 실제 일을 못 한다. 두 장면에서 작업 사이의 빨간 칸이 차지하는 몫을 견줘 보자.
+컨테이너의 CPU limit은 스케줄러와 별개인 대역폭 제어(CFS bandwidth control)가 맡는다. 이름에 CFS가 남아 있지만 EEVDF 커널에서도 같은 방식이다.
 
-<figure class="fig" data-figure="cpu-switch">
-  <figcaption>작업을 자주 바꿀수록 늘어나는 전환 비용 (전환 비용은 크게 그렸다)</figcaption>
-</figure>
-
-같은 전환 비용이라도 자주 바꾸면 10%에서 33%로 늘어난다. 스레드를 vCPU보다 지나치게 많이 띄우면 일보다 바꾸는 데 시간을 쓴다.
-
-하이퍼스레딩도 한 코어에서 스레드를 바꿔 돌리는 방법이지만, 바꾸는 주체와 비용이 다르다.
-
-| | 컨텍스트 스위칭 | 하이퍼스레딩 |
-|---|---|---|
-| 누가 바꾸나 | 커널 | CPU 하드웨어 |
-| 바꾸는 때 | 차례가 끝나거나 I/O를 기다릴 때 | 메모리를 기다릴 때마다 |
-| 레지스터 | 저장했다가 다시 불러온다 | vCPU마다 한 벌씩 따로 있다 |
-| 바꾸는 비용 | 수 µs | 거의 없다 |
-
-### CFS
-
-CFS(Completely Fair Scheduler)는 리눅스의 기본 CPU 스케줄러다. 스레드마다 CPU를 쓴 시간을 기록하고, 가장 덜 쓴 스레드를 몇 ms씩 번갈아 올려서 모두에게 같은 실행 기회를 준다.
-
-- 동시성: 아주 빨리 바꿔서 동시에 도는 것처럼 보인다.
-- 병렬: 실제로 동시에 돈다. vCPU가 여러 개일 때만 된다.
-
-컨테이너에 CPU limit을 걸면 CFS는 두 값으로 쓸 시간을 제한한다.
-
-- `cfs_period_us`: 시간을 나누는 주기. 기본 100ms이고 거의 바꾸지 않는다.
-- `cfs_quota_us`: 한 주기 동안 쓸 수 있는 최대 시간.
-
-```text
-limit 0.5 (500m)  →  100ms마다 50ms   (cfs_quota_us = 50000)
-```
-
-아래 그림은 limit 500m인 컨테이너의 시간축이다. 주기마다 파란 쿼터를 다 쓰면 그 주기가 끝날 때까지 기다린다.
+- `cfs_period_us`: 시간을 나누는 주기. 기본 100ms
+- `cfs_quota_us`: 한 주기 동안 컨테이너 전체가 쓸 수 있는 CPU 시간. limit 500m이면 50ms
 
 <figure class="fig" data-figure="cpu-cfs">
-  <figcaption>cfs_period_us 주기와 cfs_quota_us 쿼터</figcaption>
+  <figcaption>limit 500m: 주기마다 쿼터 50ms를 쓰고 나머지는 멈춘다</figcaption>
 </figure>
 
-쿼터는 주기가 바뀔 때마다 다시 찬다. 뒤에 나올 limit이 바로 이 두 값이다.
+커널은 쿼터를 **5ms 조각**으로 잘라, 스레드가 도는 vCPU마다 미리 나눠 준다(`sched_cfs_bandwidth_slice_us`). 매번 전체 쿼터를 잠그고 꺼내면 vCPU가 많을수록 느려지기 때문이고, 조각을 받아 둔 vCPU가 쉬게 되면 1ms만 남기고 나머지를 돌려준다.
 
-## CPU 사용량 지표
+조각이 이미 나가 있는 동안 다른 vCPU는 전체 쿼터가 비어 먼저 멈출 수 있다. 그래서 vCPU가 많은 노드에서는 사용량 합이 limit에 조금 못 미쳐도 쓰로틀이 걸린다.
 
-### CPU 사용률
+전체 쿼터가 바닥나면 노드 CPU가 남아 있어도 그 컨테이너의 스레드는 주기가 끝날 때까지 실행되지 않는다. 이 대기를 쓰로틀링(throttling)이라 하고, 쿼터는 다음 주기에 다시 찬다.
 
-메모리는 얼마나 차 있는지(용량)로 재지만, CPU는 얼마 동안 일했는지(시간)로 잰다. CPU 사용률 50%는 1초 중 500ms를 일했다는 뜻이다.
+## request와 limit
 
-<figure class="fig" data-figure="cpu-usage">
-  <figcaption>1초 동안 일한 시간으로 센 CPU 사용률</figcaption>
-</figure>
+쿠버네티스의 CPU 1은 vCPU 하나의 시간이다. 리눅스는 cgroup(control group)으로 프로세스를 묶어 CPU와 메모리를 함께 제한하고, 컨테이너 하나가 cgroup 하나다. 노드마다 도는 kubelet(파드를 띄우고 관리하는 에이전트)이 컨테이너 런타임(runc, crun)을 거쳐 request와 limit을 그 cgroup의 파일에 적는다.
 
-Prometheus Node Exporter의 `node_cpu_seconds_total`은 CPU 하나가 상태별로 보낸 시간을 초 단위로 쌓은 값이다.
-
-| mode | 뜻 |
-|---|---|
-| idle | 아무 일도 안 한 시간 |
-| user | 애플리케이션 코드를 실행한 시간 |
-| system | 시스템 콜 같은 커널 일을 한 시간 |
-| iowait | 디스크나 네트워크 I/O를 기다린 시간 |
-| irq | 하드웨어 인터럽트를 처리한 시간 |
-| softirq | 소프트웨어 인터럽트를 처리한 시간 |
-| nice | 우선순위를 낮춘 프로세스를 실행한 시간 |
-
-idle 시간이 늘어나는 속도가 그 CPU가 쉰 비율이고, 노드 전체 사용률은 쉰 비율의 평균을 100에서 뺀 값이다.
-
-하이퍼스레딩 환경에서 CPU 사용률 %는 실제 코어 포화도를 제대로 보여 주지 못한다. 코어 포화도는 하드웨어 성능 카운터의 Top-down 지표(Retiring, Bad Speculation, Frontend Bound, Backend Bound)와 SMT 활용률로 보고, 리눅스에서는 `perf stat`으로 확인한다.
-
-### load average
-
-CPU 사용률은 70%인데 응답이 느리다면 load average도 같이 본다. load average는 CPU에서 돌고 있거나 차례를 기다리는 OS 스레드 수의 평균이다.
-
-기준은 vCPU 수다. vCPU 32개 서버에서 32면 꽉 찬 상태이고, 이를 넘으면 차례를 기다리는 스레드가 생겨 응답이 느려진다.
-
-```text
-$ uptime
- 14:02:11 up 30 days,  load average: 12.40, 10.85, 9.12
-```
-
-세 숫자는 1분, 5분, 15분 평균이다. 부하 테스트 동안 세 선이 따라오는 속도를 지켜보자.
-
-<figure class="fig" data-figure="cpu-load">
-  <figcaption>부하 테스트 동안의 1분, 5분, 15분 load average</figcaption>
-</figure>
-
-1분 평균은 빨리 반응하고 15분 평균은 천천히 따라온다. 셋을 같이 보면 부하가 오르는 중인지 내리는 중인지 알 수 있다.
-
-load는 높은데 CPU 사용률이 낮으면, CPU보다 디스크 I/O를 기다리는 스레드가 많은지부터 본다.
-
-## 쿠버네티스의 CPU 단위
-
-쿠버네티스의 CPU 1개는 vCPU 하나다.
-
-- `cpu: "1"`: vCPU 하나를 통째로 쓰는 시간
-- `500m`: 100ms 중 50ms를 쓰는 양
-
-특정 vCPU를 떼어 주지 않고, 커널이 컨테이너(cgroup) 단위로 시간을 나눈다. 컨테이너에는 CPU 값을 두 개 적는다.
-
-```yaml
-resources:
-  requests:
-    cpu: "500m"
-  limits:
-    cpu: "1000m"
-```
-
-kubelet이 두 값을 호스트 커널의 cgroup 파일로 바꿔 적고, CFS가 그 파일을 보고 시간을 나눈다. 아래 그림에서 두 값이 커널까지 내려가는 길을 따라가 보자.
-
-<figure class="fig" data-figure="cpu-layers">
-  <figcaption>requests(파랑)와 limits(주황)가 커널까지 가는 과정</figcaption>
-</figure>
-
-cgroup에는 v1과 v2가 있다. 파일 이름과 값의 범위만 다르고 동작은 같다.
-
-- v2는 커널 4.5(2016)에 정식으로 들어왔고, 쿠버네티스는 1.25(2022)부터 정식 지원한다.
-- 1.35부터 kubelet은 기본값으로 cgroup v1 노드에서 시작하지 않는다(`failCgroupV1: true`). v1 노드를 계속 쓰려면 kubelet 설정에서 이 값을 false로 바꿔야 한다.
-- Ubuntu 22.04, RHEL 9 같은 요즘 배포판은 v2가 기본이다. 오래된 노드는 아직 v1인 경우가 많다.
-
-| | request | limit |
+| | request 500m | limit 1000m |
 |---|---|---|
-| 하는 일 | CPU 경합 때 request만큼 쓰도록 보장 | 더 쓰려 할 때 주기마다 쓸 CPU 시간의 총량 제한 |
-| CPU가 남을 때 | 더 가져다 쓴다 | 남아도 상한에서 멈춘다 |
-| cgroup v1 파일 (500m, 1000m) | `cpu.shares = 512` | `cpu.cfs_quota_us = 100000`, `cpu.cfs_period_us = 100000` |
-| cgroup v2 파일 (500m, 1000m) | `cpu.weight = 20` | `cpu.max = 100000 100000` |
+| cgroup v2 | `cpu.weight = 59` (옛 식으로는 20) | `cpu.max = 100000 100000` |
+| cgroup v1 | `cpu.shares = 512` | `cfs_quota_us = 100000`, `cfs_period_us = 100000` |
+| 하는 일 | 경합 때 나눠 가질 비율 | 주기마다 쓸 시간의 상한 |
 
-### request
+### request와 CPU 경합
 
-혼자 돌 때는 멀쩡하던 서버가, 같은 노드에 바쁜 파드 하나가 더 올라오자 느려진다. 이때 서버가 받는 CPU를 정하는 값이 request다.
+request는 비율이다. cgroup v1의 shares는 CPU 1개를 1024로 놓는 값이라 500m은 512가 되고, v2에서는 이를 weight(1~10000)로 옮긴다. 앞에서 본 가상 실행 시간의 나눗수가 바로 이 weight다.
 
-request는 CPU 경합 상태에서 request만큼은 쓰도록 보장하는 값이다. 커널에는 나눠 가질 비율로 들어가고, 500m은 이렇게 바뀐다.
+weight 값은 런타임 버전에 따라 20(옛 식) 또는 59(runc 1.3.2, crun 1.23부터의 새 식)다. 새 식은 1 CPU가 v2 기본값 100 근처에 오도록 바꾼 것이라, 노드에서 `cpu.weight`를 직접 확인한다. CPU가 남으면 weight는 아무 제한이 없고, 노드가 꽉 찼을 때만 그 비율대로 나눠 받는다.
 
-```text
-cgroup v1  cpu.shares = 500 × 1024 ÷ 1000 = 512
-cgroup v2  cpu.weight = 20   (shares 512를 v2 범위 1~10000으로 옮긴 값)
-```
+쿠버네티스 스케줄러(kube-scheduler)는 노드에 올린 파드들의 request 합이 노드의 할당 가능 CPU(allocatable)를 넘지 않게 배치한다. 그래서 경합이 나도 각 파드는 적어도 request만큼은 받는다.
 
-비율이라 CPU가 모자랄 때만 쓰인다. CPU가 남으면 아무 제한이 없고, 스케줄러는 노드에 올린 파드들의 request 합이 노드 CPU를 넘지 않게 배치한다.
-
-아래 두 그림은 vCPU 1개 노드에 request 500m, limit 1000m인 서버를 두고 초당 요청을 올린 경우다. 요청 하나가 CPU 10ms를 쓰면 초당 100에서 vCPU 하나를 꽉 채운다. 두 그림에서 선이 어느 점선에서 꺾이는지 견줘 보자.
+아래 두 그림은 vCPU 1개 노드에 request 500m, limit 1000m인 서버를 두고 초당 요청을 올린 시뮬레이션이다. 요청 하나가 CPU 10ms를 쓰면 초당 100에서 vCPU가 꽉 찬다.
 
 <figure class="fig" data-figure="cpu-share-alone">
   <figcaption>서버 하나일 때 초당 요청과 못 쓴 CPU</figcaption>
@@ -274,287 +90,150 @@ cgroup v2  cpu.weight = 20   (shares 512를 v2 범위 1~10000으로 옮긴 값)
   <figcaption>서버 둘이 vCPU 하나를 나눌 때 초당 요청과 못 쓴 CPU</figcaption>
 </figure>
 
-혼자 있으면 vCPU를 다 써서 초당 100까지 원하는 CPU를 모두 받는다. 둘이 같이 바쁘면 vCPU를 번갈아 나눠 써서, 초당 50(request 500m)을 넘는 순간부터 둘 다 원하는 CPU를 못 받는다. 초당 100에서는 각자 50%를 못 써서 요청 처리 시간이 약 2배가 된다.
+혼자면 초당 100까지 원하는 CPU를 다 받는다. 두 서버가 같은 부하를 받으면 초당 50, 즉 request 500m을 넘는 순간부터 둘 다 원하는 만큼 못 받는다. 초당 100에서는 각자 필요한 CPU의 절반만 받아 초당 50건밖에 처리하지 못하고, 남는 요청이 대기 줄에 쌓여 응답 시간이 계속 늘어난다.
 
-그림의 수치는 위 가정으로 계산한 시뮬레이션 값이다. 둘 다 limit 1000m에 닿지 않아 쓰로틀은 0이고, 느려지는 이유는 CPU 대기다.
-
-스케줄러가 request를 보고 노드를 고르니, limit은 빼더라도 request는 실제 사용량을 재서 꼭 정한다.
+이때 둘 다 limit에 닿지 않아 쓰로틀 카운터는 0이고, 늘어나는 건 CPU를 기다린 시간뿐이다. 이 시간은 뒤에서 볼 PSI로 잰다. request를 실제 사용량보다 낮게 잡으면 경합 때 그만큼 덜 받는다.
 
 ### limit과 쓰로틀링
 
-CPU 사용률 그래프는 평균 40%로 여유로운데 응답 시간이 가끔 튄다. limit에 걸린 쓰로틀링(throttling)일 때가 많다.
+limit은 컨테이너 안 모든 스레드가 한 주기에 쓴 시간의 합으로 잰다. 그래서 limit 1000m이라도 스레드 둘이 vCPU 두 개에서 같이 돌면 50ms 만에 100ms어치를 다 쓰고, 나머지 50ms 동안 멈춘다.
 
-limit은 서버가 limit보다 더 쓰려 할 때, 일정 주기마다 쓸 수 있는 CPU 시간의 총량을 제한하는 값이다. limit 1000m은 100ms 주기마다 100ms까지 쓸 수 있다는 뜻이다.
+limit을 넉넉히 주면 되지 않나 싶지만, 쿼터는 평균이 아니라 100ms 단위로 잰다. 평균 사용률이 limit의 40%여도 요청이 몰리는 100ms 안에서는 쿼터가 바닥나고, 그 주기에 들어온 요청은 다음 주기까지 기다린다.
 
-```text
-cgroup v1  cpu.cfs_quota_us = 100000, cpu.cfs_period_us = 100000
-cgroup v2  cpu.max = 100000 100000   (쿼터와 주기, 단위 µs)
-```
-
-커널은 주기마다 컨테이너 안 모든 스레드가 쓴 시간을 합쳐 잰다. 트래픽이 늘어 한 주기의 쿼터를 다 쓰면, 노드 CPU가 남아 있어도 컨테이너 전체가 CPU를 못 쓰고 `cfs_period_us`가 끝날 때까지 기다린다. 이 대기를 CFS 쓰로틀링이라고 한다.
-
-- 스레드 하나: vCPU 하나만 쓸 수 있어 1000m을 넘지 못한다.
-- 스레드 둘: vCPU 두 개에서 같이 돌면 50ms 만에 100ms어치를 다 쓰고 남은 50ms를 멈춘다.
-
-limit을 넉넉히 주면 되지 않나 싶지만, 쿼터는 평균이 아니라 **100ms 단위로** 잰다. 그래서 순간적으로 CPU를 몰아 쓰는 서비스는 평균 사용량이 limit보다 한참 낮아도 응답이 갑자기 길어진다.
-
-Docker의 `--cpus`도 같은 방식이라, limit 1에 계산하는 스레드 2개를 돌리면 바로 재현된다.
-
-컨테이너 안의 `cpu.stat`에 쓰로틀 횟수가 남는다.
-
-```text
-$ cat /sys/fs/cgroup/cpu.stat
-usage_usec 15643791
-user_usec 15009440
-system_usec 634351
-nr_periods 343
-nr_throttled 292
-throttled_usec 39604126
-```
-
-- `nr_periods`: 지나간 주기 수
-- `nr_throttled`: 그중 할당량을 다 써서 멈춘 주기 수
-- `throttled_usec`: 멈춰 있던 시간의 합
-
-이 예시는 343번 중 292번, 85%가 멈췄다. 응답이 튀는데 사용률이 낮다면 `nr_throttled / nr_periods`부터 본다.
-
-## Node.js의 스레드와 이벤트 루프
-
-"Node.js는 싱글 스레드"라는 말을 듣고 limit을 1로 걸었다가 쓰로틀을 겪는 경우가 많다. JS 언어 자체에는 스레드 개념이 없고, 스레드를 몇 개 쓸지는 런타임(V8과 Node)이 정한다.
-
-그래서 Node.js 프로세스는 멀티스레드다. "JS는 싱글"이라는 말은 JS 코드가 스레드 하나에서만 실행된다는 뜻이다.
-
-### Node.js의 스레드 구성
-
-| 스레드 | 하는 일 | JS 실행 |
-|---|---|---|
-| 메인 스레드 1개 | V8로 JS 실행, libuv 이벤트 루프. 네트워크 I/O는 전부 여기서 epoll로 처리 | O |
-| libuv 스레드 풀 (기본 4개) | 파일 읽기와 쓰기, `dns.lookup`, `crypto`(`pbkdf2`, `scrypt`, `randomBytes`), `zlib`처럼 epoll로 기다릴 수 없는 블로킹 작업 대행 | X |
-| V8 헬퍼 스레드 | GC, JIT 컴파일 | X |
-| `worker_threads` (쓸 때만) | 별도 V8 isolate와 별도 이벤트 루프. 메모리를 공유하지 않는다 | O |
-
-<figure class="fig" data-figure="cpu-node-arch">
-  <figcaption>Node.js 프로세스의 스레드 구성</figcaption>
-</figure>
-
-스레드 풀 크기는 `UV_THREADPOOL_SIZE`로 바꿀 수 있고 최대는 1024다. 모든 이벤트 루프가 이 풀 하나를 같이 쓴다.
-
-워커 스레드는 CPU를 오래 쓰는 JS를 위한 것이다. 공식 문서도 I/O에는 별 도움이 안 된다고 적어 놓았다. 내장 비동기 I/O가 더 효율적이기 때문이다.
-
-### 동시 요청 처리 방식
-
-API 서버의 요청 하나를 나눠 보면 CPU를 쓰는 시간은 몇백 µs다. 나머지 수십에서 수백 ms는 전부 DB 응답을 기다리는 시간이다.
-
-그래서 "동시에 1만 건"은 1만 건을 동시에 **기다린다**는 뜻이다. 기다리는 일을 스레드가 하는지 커널이 하는지에 따라 방식이 둘로 나뉜다.
-
-- A. 요청마다 스레드 하나
-  - 스레드가 `read(fd 21)`을 부르면 커널은 데이터가 올 때까지 그 스레드를 대기시킨다.
-  - 1만 건을 동시에 기다리려면 스레드 1만 개가 필요하다.
-  - 스택 1만 개에 컨텍스트 스위칭 비용까지 붙는다.
-- B. epoll에 등록하고 스레드 하나로 받기
-  - 소켓 1만 개를 커널의 epoll에 등록해 둔다.
-  - 스레드는 `epoll_wait` 한 번으로 "그중 아무거나 준비되면 알려 달라" 하고 대기한다.
-  - 1만 건의 대기가 `epoll_wait` 호출 하나로 줄어서 스레드 하나로 된다. Node가 이 방식이다.
-
-동시 요청이 늘 때 두 방식의 스레드 수가 어떻게 갈리는지 보자.
-
-<figure class="fig" data-figure="cpu-wait-model">
-  <figcaption>동시 요청이 늘 때 스레드 수 비교</figcaption>
-</figure>
-
-### epoll
-
-epoll은 시스템 콜 세 개를 쓴다. epoll이 알려 주는 것은 읽을 준비가 된 소켓 목록이고, 실제로 읽는 일은 그다음에 메인 스레드가 한다.
-
-| 시스템 콜 | 하는 일 | Node에서 부르는 때 |
-|---|---|---|
-| `epoll_create1()` | 커널에 감시 목록, 준비됨 목록, 대기 중인 스레드 목록을 만든다 | 프로세스 시작 때 한 번 |
-| `epoll_ctl(ADD, fd, EPOLLIN)` | "이 fd에 읽을 게 생기면 알려 달라"고 등록한다 | listen 소켓, accept한 소켓, DB 커넥션이 만들어질 때 한 번씩 (쿼리마다가 아님) |
-| `epoll_wait()` | 준비됨 목록을 받아 온다. 비어 있으면 스레드를 대기시킨다 | 이벤트 루프가 한 바퀴 돌 때마다 poll 단계에서 |
-
-<figure class="fig" data-figure="cpu-epoll">
-  <figcaption>epoll 시스템 콜 세 개가 하는 일</figcaption>
-</figure>
-
-### 요청 처리 흐름
-
-서버가 켜지면 커넥션 풀이 MySQL 연결 하나(fd 21)를 맺는다. libuv는 `epoll_ctl`로 "읽을 데이터가 생기면 알려 달라"고 등록해 둔다. 그다음 요청 한 건은 이렇게 흘러간다.
-
-1. 핸들러가 `pool.query`를 부르면 드라이버는 콜백을 보관하고 쿼리를 `write(21)`로 소켓에 쓴다. 커널은 송신 큐에 복사만 하고 바로 돌아오므로 핸들러는 기다리지 않고 끝난다.
-2. 이벤트 루프는 한 바퀴 돌 때마다 `epoll_wait`를 부른다. 준비된 소켓이 없으면 메인 스레드는 CPU에서 내려간다. 앞에서 본 자발적 스위칭이다.
-3. 응답 패킷이 오면 커널이 fd 21의 수신 큐에 바이트를 넣고 준비됨 목록에 21을 올린다. Node 코드는 아직 한 줄도 돌지 않는다.
-4. 메인 스레드가 대기 중이면 커널이 깨운다. 스케줄러가 CPU를 다시 주면 멈춰 있던 `epoll_wait`가 "21번 소켓에 읽을 게 있다"를 들고 돌아온다.
-5. libuv가 `read(21)`로 바이트를 가져오고, 드라이버가 보관해 둔 콜백을 부른다. 콜백은 응답을 쓰고 fd 21을 풀에 돌려준다.
-
-아래 그림은 이 다섯 단계를 JS 스레드, epoll, 소켓, MySQL 사이의 시퀀스로 보여 준다. ② 대기 동안 JS 스레드가 CPU를 쓰는지 지켜보자.
-
-<figure class="fig" data-figure="cpu-request-flow">
-  <figcaption>쿼리 한 건 동안 JS 스레드가 일하는 구간</figcaption>
-</figure>
-
-대기하는 동안 JS 스레드는 CPU를 하나도 쓰지 않고, DB 응답을 기다리는 일은 커널이 맡는다. 메인 스레드가 한 요청에 쓰는 건 시스템 콜 네 번과 JS 몇 줄뿐이라, 그 사이에 다른 요청을 처리할 수 있다.
-
-커넥션은 한 번에 쿼리 하나만 처리해서, 다른 요청이 오면 풀이 연결을 하나 더 열거나 반납을 기다리게 한다.
-
-### 이벤트 루프 블로킹
-
-평소에는 빠르던 API가, 보고서 다운로드 요청 하나가 들어올 때마다 전부 함께 느려진다. 이벤트 루프는 스레드 하나라서, 콜백 하나가 CPU를 오래 잡으면 그동안 다른 콜백은 돌지 못한다.
-
-대기 1만 건은 커널이 맡지만, 준비된 결과를 읽고 처리하는 건 메인 스레드 하나다. 아래 데모에서 무거운 요청을 보내 보자. 모드를 바꿔 가며 3ms에 도착한 요청 B가 얼마나 기다리는지 본다.
-
-<figure class="fig" data-figure="cpu-eventloop">
-  <figcaption>무거운 계산이 이벤트 루프를 막는 모습</figcaption>
-</figure>
-
-통째로 계산하면 B는 37ms를 기다리고, 5ms씩 쪼개면 2ms만 기다린다. 쪼개도 일의 총량은 같아서 A가 끝나는 시각은 거의 같고, 바뀌는 건 **사이에 다른 요청이 끼어들 틈**뿐이다.
-
-흔한 예는 한 요청에서 수십만 행을 한꺼번에 객체로 만들고 통째로 문자열로 바꾸는 경우다. DB를 기다리는 동안은 괜찮지만, 문자열로 바꾸는 동안 다른 요청이 전부 멈춘다.
-
-Node.js 문서가 권하는 방법은 두 가지다.
-
-| 방법 | 언제 | 하는 일 |
-|---|---|---|
-| 쪼개기 | 계산이 단순할 때 | 이벤트 루프에서 돌되 중간중간 다른 이벤트에 차례를 넘긴다 |
-| 워커로 넘기기 | 계산이 복잡할 때 | 루프 밖(`worker_threads`)으로 뺀다. 루프는 조율만 한다 |
-
-스레드 풀도 막힌다. 풀 4개를 모두가 나눠 쓰기 때문에, `pbkdf2`를 4개 돌리면 그동안 파일 읽기가 뒤에서 기다린다.
-
-루프가 막히는지는 이벤트 루프 지연으로 본다. 콜백이 실행되기로 한 시각보다 얼마나 늦게 실행됐는지다.
-
-## Node.js의 CPU 사용량
-
-### 쿠버네티스에서의 사용량
-
-싱글 스레드니까 1코어면 되지 않나 싶지만, 프로세스 전체는 vCPU를 하나보다 더 쓴다. 워커 스레드를 쓰지 않아도 아래 둘이 같이 돈다.
-
-- libuv 스레드 풀
-- V8 헬퍼 스레드. 수는 온라인 프로세서 수를 보고 정한다(`--v8-pool-size`).
-
-V8의 concurrent marking이 대표적이다. 메인 스레드가 JS를 돌리는 동안 다른 스레드들이 힙에서 살아 있는 객체를 표시한다. 둘이 같은 시각에 도니 vCPU를 둘 쓰고, 부하가 걸리면 한 프로세스가 2000m 가까이 쓰기도 한다.
-
-아래 그림에서 부하 장면을 보자. JS 메인과 V8 헬퍼가 같은 쿼터를 나눠 쓰다 50ms에 바닥난다.
-
-<figure class="fig" data-figure="cpu-node-limit">
-  <figcaption>limit 1000m에서 Node.js 프로세스의 100ms</figcaption>
-</figure>
-
-limit은 컨테이너 안 모든 스레드가 쓴 시간을 합쳐서 잰다. 그래서 cpu limit을 1로 걸면 워커 스레드를 안 써도 쓰로틀이 걸린다.
-
-- request는 실제 사용량을 재서 잡는다.
-- limit을 건다면 여유 있게 두고 쓰로틀 비율을 같이 본다.
-
-메모리 쪽(힙 상한, OOMKilled)은 [메모리 이해하기]({{ site.baseurl }}{% post_url 2026-10-26-memory %})에 정리했다.
-
-### 직렬화와 CPU
-
-트래픽은 그대로인데 CPU 사용량만 두 배가 됐다면, 응답 크기가 커지지 않았는지부터 본다. API 서버가 요청 하나에 쓰는 CPU는 대부분 데이터 변환이기 때문이다.
-
-- 요청 본문 JSON 파싱
-- DB 결과 행을 객체로 바꾸기
-- 응답 객체를 JSON 문자열로 바꾸기
-- 응답 압축(gzip)과 TLS 암호화
-- 로그 문자열 만들기
-
-변환 시간은 바이트 수에 비례한다. 같은 API라도 응답이 10KB에서 1MB가 되면 변환에 드는 CPU 시간도 대략 100배가 된다. 그래서 CPU 사용량은 **초당 요청 수보다 응답 크기**를 따라간다.
-
-응답 크기를 바꿔 가며 요청을 보내 보면, 큰 응답을 변환하는 동안 다음 요청이 얼마나 기다리는지 보인다.
-
-<figure class="fig" data-figure="cpu-serialize">
-  <figcaption>응답 크기에 따라 vCPU를 쓰는 시간 (시간은 모양을 보여 주는 대략값)</figcaption>
-</figure>
-
-Node.js에서는 이 변환이 메인 스레드에서 돈다. 큰 응답 하나를 변환하는 동안 다른 요청은 차례를 기다린다. 앞의 이벤트 루프 블로킹과 같은 모습이다.
-
-변환은 금방 버려지는 임시 객체를 많이 만든다. 이 객체를 치우는 GC가 V8 헬퍼 스레드에서 돌아서, 프로세스가 1000m을 넘겨 쓰는 원인이 된다.
-
-줄이는 방법은 대개 아래 넷이다.
-
-- 덜 보낸다: 페이지네이션, 필요한 필드만 고르기
-- 두 번 변환하지 않는다: DB가 JSON으로 준 값을 파싱했다가 다시 문자열로 바꾸지 않는다
-- 빠르게 변환한다: 스키마를 미리 아는 직렬화(fast-json-stringify 등)나 바이너리 포맷(Protobuf, MessagePack)
-- 압축 수준을 조절한다: 압축도 CPU를 쓴다. 작은 응답은 압축하지 않는다
-
-어디에 CPU를 쓰는지는 CPU 프로파일의 플레임 그래프로 확인한다. `JSON.parse`와 `JSON.stringify`가 차지하는 폭이 곧 변환 비용이다.
-
-## request와 limit 설정 기준
-
-### 짧은 요청과 스트림
-
-같은 vCPU 4개라도 API 서버는 스레드 200개로 잘 돌고, 영상 인코딩 서버는 스트림 8개만 넘어도 버벅인다. 요청이 CPU를 쓰는 모양이 다르기 때문이다.
-
-웹 서버처럼 요청이 몇 ms 안에 끝나는 시스템은 스레드 대부분이 응답을 기다리고 있다. 영상 인코딩이나 실시간 데이터 변환처럼 연결을 붙잡고 계속 계산하는 스트림은 스레드가 CPU를 놓지 않아서, 스레드가 늘수록 서로 기다리는 시간만 늘어난다.
-
-두 장면에서 vCPU 줄의 빈칸을 견줘 보자.
-
-<figure class="fig" data-figure="cpu-threads">
-  <figcaption>짧은 요청과 스트림이 vCPU를 쓰는 모습</figcaption>
-</figure>
-
-짧은 요청은 블록 사이가 비고, 스트림은 빈틈없이 번갈아 차서 CPU 하나에 스트림 8개면 하나당 12.5%밖에 못 쓴다. 그래서 스트림은 연결 하나가 CPU를 얼마나 꾸준히 쓰는지로 계산한다. 연결 하나가 CPU의 30%를 쓰면 CPU 하나로 3개, 여유를 두면 2개 정도다.
-
-vCPU 수만 보고 잡으면 놓치기 쉬운 것도 두 가지 있다.
-
-- vCPU 하나가 물리 코어 하나가 아닐 수 있다. 하이퍼스레딩으로 만든 vCPU면 같은 코어의 다른 vCPU가 바쁠 때 계산 성능이 덜 나온다.
-- AWS T 계열 같은 버스트형 인스턴스는 기준 성능이 낮다. 계속 쓰면 성능이 떨어지거나 추가 요금이 붙는다.
-
-쿠버네티스에서는 이 계산 결과를 request 값으로 쓴다. 스트림 파드의 request를 짧은 요청 서버처럼 낮게 잡으면 한 노드에 너무 많이 몰리고, limit까지 있으면 쓰로틀링도 겹친다.
-
-### limit 설정 기준
-
-limit을 걸지 말지는 워크로드마다 다르다.
-
-- 웹 서버처럼 I/O를 주로 기다리는 서비스: 요청이 몰리는 순간 CPU를 많이 쓴다. 이때 limit에 걸리면 쓰로틀링되어 응답이 늦어진다. request를 실제 사용량에 맞게 잡고 limit은 빼는 것도 고려할 만하다.
-- ML 서버, 연산 위주 작업, 벤치마크: CPU를 꾸준히 쓰고 다른 파드에 주는 영향과 재현성이 중요하다. request와 limit을 둘 다 정한다.
-
-요청이 몰리게 한 뒤 limit을 걸었을 때와 뺐을 때 일이 끝나는 시각을 견줘 보자.
+아래 데모에서 요청을 몰리게 한 뒤 limit 1000m과 limit 없음을 바꿔 가며 일이 끝나는 시각을 비교할 수 있다.
 
 <figure class="fig" data-figure="cpu-burst">
   <figcaption>요청이 몰릴 때 limit이 자르는 구간</figcaption>
 </figure>
 
-같은 일을 limit 1000m에서는 130ms에, limit 없이는 80ms에 끝낸다. 50ms 차이는 쿼터를 다 쓰고 다음 주기를 기다린 시간이다.
+같은 일이 limit 1000m에서는 130ms, limit 없이는 80ms에 끝난다. 50ms 차이는 쿼터를 다 쓰고 다음 주기를 기다린 시간이다.
 
-limit을 빼면 쓰로틀이 없어져 응답은 빨라진다. 다만 런타임은 스레드를 몇 개 띄울지 limit이나 노드의 코어 수를 보고 정해서, limit이 없으면 노드 전체 코어를 자기 몫으로 본다.
+쓰로틀은 컨테이너의 `cpu.stat`에 남는다. 아래는 vCPU 12개 노드(WSL2, 커널 6.18)에서 Docker `--cpus=1` 컨테이너에 계산만 하는 스레드 2개를 20초 돌린 뒤 읽은 값이다. `--cpus=1`은 limit 1000m과 같은 `cpu.max = 100000 100000`이다.
 
-- Go: 1.25부터 GOMAXPROCS를 limit에 맞춘다. limit이 없으면 노드의 코어 수가 된다.
-- Java: limit이 없으면 노드의 코어 수로 GC 스레드와 ForkJoin 풀 크기를 정한다.
-- Node.js: limit과 상관없이 V8 헬퍼 스레드 수를 노드의 코어 수로 정한다.
+```text
+$ cat /sys/fs/cgroup/cpu.stat
+usage_usec 20103209
+user_usec 20071012
+system_usec 32197
+nr_periods 201
+nr_throttled 200
+throttled_usec 22365968
+```
 
-64코어 노드에서 request 500m인 파드가 스레드를 64개씩 띄우면, 실제로 받는 CPU는 0.5코어인데 스레드끼리 번갈아 도느라 컨텍스트 스위칭과 GC 비용만 늘어난다. 같은 노드의 다른 파드와도 그만큼 더 경합한다.
+201번의 주기 중 200번이 쿼터를 다 써서 멈췄고, 20초 동안 쓴 CPU는 정확히 1코어 × 20초다. `throttled_usec`가 22.4초로 벽시계 20초보다 큰 것은 멈춘 시간을 vCPU마다 더하기 때문이다.
 
-그래서 limit을 뺄 때는 런타임이 쓸 CPU 수를 request에 맞춰 직접 정한다. Go는 GOMAXPROCS, Java는 ActiveProcessorCount, Node.js는 V8 풀 크기다.
+사용률 그래프가 낮은데 응답이 튀면 `nr_throttled ÷ nr_periods`가 원인을 알려 준다. 커널 5.14부터는 `cpu.max.burst`로 앞 주기에 덜 쓴 쿼터를 넘겨 짧은 몰림을 받아낼 수 있지만, 쿠버네티스 리소스 필드에는 아직 이 값이 없다.
 
-> **memory의 request와 limit.** memory request는 스케줄링과, 메모리가 부족할 때 어떤 파드를 먼저 내보낼지 정하는 데만 쓰이고 cgroup에는 limit만 들어간다. CPU는 넘치면 느려지지만 memory는 넘치면 OOM으로 죽는다. 그래서 request와 limit을 같게 두는 편이 안전하다.
-{: .warn}
+## 사용률과 PSI
+
+CPU 사용률은 시간으로 잰다. 커널은 vCPU마다 시간을 user(앱 코드), system(커널 일), iowait(할 일이 I/O 대기뿐이라 쉰 시간), steal(클라우드에서 다른 VM에 빼앗긴 시간), idle로 나눠 쌓는다. 사용률은 보통 idle과 iowait를 뺀 비율이지만, idle만 빼는 대시보드도 있어 도구마다 값이 조금 다르다. 50%면 1초 중 500ms를 일했다는 뜻이다.
+
+사용률에는 두 가지가 안 보인다. 하이퍼스레딩에서는 vCPU 둘이 100%여도 실행 장치는 메모리를 기다리며 놀 수 있다. 또 수집 간격(보통 15초 이상)의 평균이라, 100ms 단위로 생기는 쓰로틀과 순간 경합이 묻힌다.
+
+load average(실행 중이거나 차례를 기다리는 스레드 수의 평균)도 답이 되지 못한다. 리눅스는 디스크를 기다리며 멈춘 스레드(D 상태)까지 세고, 컨테이너 안에서 봐도 노드 전체의 값이 나오기 때문이다.
+
+"CPU를 기다린 시간"을 바로 재는 지표는 PSI(Pressure Stall Information)다. 커널 4.20부터 `/proc/pressure/cpu`에, cgroup v2에서는 컨테이너마다 `cpu.pressure`에 실행할 스레드가 있는데 CPU를 못 받은 시간의 비율이 나온다.
+
+앞의 쓰로틀 컨테이너에서 같은 시각에 읽은 값이다.
+
+```text
+$ cat /sys/fs/cgroup/cpu.pressure
+some avg10=41.24 avg60=13.34 avg300=3.12 total=10191781
+full avg10=41.24 avg60=13.34 avg300=3.12 total=10191781
+```
+
+`some avg10=41.24`는 지난 10초 중 41%의 시간 동안 스레드 하나 이상이 CPU를 기다렸다는 뜻이고, `full`은 모든 스레드가 동시에 기다린 비율이다. 쓰로틀은 컨테이너 전체를 한꺼번에 멈추므로 두 값이 같고, 주기마다 절반을 멈추니 부하가 이어지면 50%로 올라간다.
+
+사용률이 "얼마나 썼나"라면 PSI는 "얼마나 기다렸나"다. 이 대기에는 limit에 걸린 쓰로틀도, 다른 파드와의 경합도 들어간다(커널 5.7부터). 그래서 PSI가 오르면 CPU 때문에 느려진 것이고, 둘 중 무엇인지는 앞에서 본 `nr_throttled`로 가른다.
+
+## Node.js 서버의 CPU
+
+"Node.js는 싱글 스레드"는 JS 코드가 메인 스레드 하나에서만 돈다는 뜻이다. 프로세스에는 다른 스레드가 더 있다.
+
+| 스레드 | 하는 일 | 수 |
+|---|---|---|
+| 메인 스레드 | JS 실행과 이벤트 루프. 네트워크 I/O는 epoll로 여기서 처리 | 1 |
+| libuv 스레드 풀 | 파일 읽기와 쓰기, `dns.lookup`, `crypto`, `zlib` | 기본 4 (`UV_THREADPOOL_SIZE`) |
+| V8 헬퍼 스레드 | GC와 JIT 컴파일 | 기본 4 (`--v8-pool-size`) |
+| `worker_threads` | CPU를 오래 쓰는 JS를 따로 돌린다 | 쓸 때만 |
+
+<figure class="fig" data-figure="cpu-node-arch">
+  <figcaption>Node.js 프로세스의 스레드 구성</figcaption>
+</figure>
+
+메인 스레드는 epoll로 연결 1만 개를 함께 기다린다. 소켓을 커널의 epoll에 등록해 두고 `epoll_wait` 한 번으로 준비된 소켓이 생길 때까지 대기한다. 요청마다 스레드를 두면 스레드 1만 개가 필요하고, 스택만 기본 8MB씩 80GB의 가상 메모리를 예약한다.
+
+DB 쿼리 한 건은 이렇게 흐른다. 쿼리를 소켓에 쓰고(`write`) 곧바로 `epoll_wait`로 대기한다.
+
+응답이 오면 커널이 소켓을 준비됨 목록에 올리고 메인 스레드를 깨운다. 메인 스레드는 `read`로 응답을 가져와 콜백을 부른다.
+
+<figure class="fig" data-figure="cpu-request-flow">
+  <figcaption>쿼리 한 건 동안 JS 스레드가 일하는 구간</figcaption>
+</figure>
+
+대기하는 동안 메인 스레드는 CPU를 하나도 쓰지 않고, 그 사이에 다른 요청의 콜백을 돈다. 반대로 콜백 하나가 CPU를 오래 잡으면 나머지는 전부 멈춘다. 대기 1만 건은 커널이 맡지만, 준비된 결과를 처리하는 건 메인 스레드 하나이기 때문이다.
+
+아래 데모는 무거운 요청 A가 메인 스레드를 잡은 사이 3ms에 도착한 요청 B를 보여 준다. 모드를 바꾸면 A를 통째로 계산할 때와 5ms씩 쪼갤 때를 비교할 수 있다.
+
+<figure class="fig" data-figure="cpu-eventloop">
+  <figcaption>무거운 계산이 이벤트 루프를 막는 모습</figcaption>
+</figure>
+
+통째로 계산하면 B는 37ms를 기다리고, 5ms씩 쪼개면 2ms만 기다린다. 쪼갠 조각 사이마다 이벤트 루프가 한 바퀴 돌아 B의 콜백을 먼저 처리하기 때문이고, 일의 총량은 같아서 A가 끝나는 시각은 거의 같다. 계산이 단순하면 5ms쯤 계산한 뒤 `setImmediate`로 나머지를 예약해 이벤트 루프에 차례를 넘긴다. `Promise`나 `process.nextTick`으로 이으면 같은 차례 안에서 바로 실행돼 틈이 생기지 않는다. 계산이 복잡하면 `worker_threads`로 뺀다.
+
+API 서버에서 이런 계산의 대부분은 JSON 변환이다. 변환 시간은 바이트 수에 비례해서 응답이 10KB에서 1MB가 되면 CPU도 약 100배 들고, 그동안 메인 스레드가 막힌다. 페이지네이션으로 덜 보내고, DB가 준 JSON을 파싱했다가 다시 문자열로 바꾸지 않는 것만으로 CPU가 크게 준다.
+
+변환은 금방 버려지는 객체도 많이 만든다. 이걸 치우는 GC(가비지 컬렉션, 안 쓰는 메모리를 찾아 비우는 일)가 V8 헬퍼 스레드에서 메인 스레드와 같은 시각에 돌아서, 부하가 걸린 Node 프로세스는 1000m을 넘겨 쓰기도 한다.
+
+<figure class="fig" data-figure="cpu-node-limit">
+  <figcaption>limit 1000m에서 JS 메인과 GC가 쿼터를 나눠 쓰는 100ms</figcaption>
+</figure>
+
+"싱글 스레드니까 1코어면 된다"며 limit을 1로 걸면 워커를 안 써도 쓰로틀이 걸리는 이유다. 메모리 쪽(힙 상한, OOMKilled)은 [메모리 이해하기]({{ site.baseurl }}{% post_url 2026-10-26-memory %})에 정리했다.
+
+## 설정 기준
+
+request는 "경합 때 받을 몫"이라 실제 사용량을 재서 잡는다. 요청이 몇 ms 안에 끝나는 API 서버는 바쁜 시간대 사용량의 상위 5% 값(p95)을 기준으로, 연결을 붙잡고 계속 계산하는 스트림(영상 인코딩, 실시간 변환)은 연결 하나가 꾸준히 쓰는 양 × 연결 수로 잡는다. 연결 하나가 vCPU의 30%를 쓰면 vCPU 하나에 3개, 여유를 두면 2개다.
+
+| 워크로드 | 설정 |
+|---|---|
+| I/O를 기다리는 웹 서버, API 서버 | request는 실측에 맞추고 limit은 빼는 것을 고려한다. 몰리는 순간의 쓰로틀이 곧 응답 지연이다 |
+| ML 서빙, 연산 위주 작업 | request와 limit을 둘 다 정한다. 다른 파드에 주는 영향과 재현성이 중요하다 |
+| 지연에 민감한 연산 | request와 limit을 같은 정수로 둔다(Guaranteed QoS). kubelet의 CPU Manager를 static 정책으로 켜면(기본은 none) 코어를 통째로 주고, 1.33부터는 이런 컨테이너에 쿼터도 걸지 않는다 |
+
+limit을 뺄 때는 런타임이 "쓸 수 있는 CPU 수"를 어떻게 정하는지 확인한다. limit이 없으면 cgroup에 상한이 없으니 노드 전체 코어를 자기 몫으로 본다.
+
+- Go: 1.25부터 GOMAXPROCS를 `cpu.max`에 맞춘다. limit이 없으면 노드 코어 수가 된다
+- Java: CPU 수를 `cpu.max`로 정하고 request는 보지 않는다. limit이 없으면 노드 코어 수만큼 GC 스레드와 ForkJoin 풀을 만든다
+- Node.js: libuv와 V8 풀은 기본 4개로 고정이다. `os.availableParallelism()`으로 워커 수를 정하는 코드는 libuv 1.49 이후 `cpu.max`를 따르므로 limit이 없으면 노드 코어 수만큼 워커를 띄운다
+
+64코어 노드에서 request 500m인 파드가 스레드 64개를 띄우면, 경합 때 보장받는 CPU는 0.5코어인데 스레드 64개가 그 몫을 나눠 쓰니 스위칭과 GC 비용만 커진다. limit을 뺐다면 Go의 `GOMAXPROCS`, JVM의 `-XX:ActiveProcessorCount`, Node의 워커 수를 request에 맞춰 직접 정한다.
 
 ## 정리
 
 | | 하는 일 | 기억할 점 |
 |---|---|---|
-| request | 경합 때 request만큼 보장, 스케줄링 기준 | 남는 CPU는 더 쓴다. 꼭 정한다 |
-| limit | 주기마다 쓸 CPU 시간의 총량 제한 | 다 쓰면 노드 CPU가 남아도 멈춘다 |
-| Node.js 싱글 스레드 | JS 코드가 메인 스레드 하나에서 돈다 | 프로세스는 멀티스레드다 |
-| Node.js 동시 처리 | 여러 요청의 응답을 동시에 기다린다. 대기는 epoll이 맡는다 | 콜백 하나가 오래 잡으면 전부 멈춘다. 쪼개거나 워커로 |
-| Node.js와 limit | libuv 풀과 V8 풀도 CPU를 쓴다 | 싱글 스레드라고 limit 1이면 쓰로틀이 걸린다 |
-| 직렬화 | API 서버 CPU의 대부분 | 응답 크기에 비례한다. 덜 보내고 두 번 변환하지 않는다 |
-| 스트림 서버 | 연결당 CPU 사용량으로 계산 | 하이퍼스레딩, 버스트형 인스턴스 주의 |
+| 스케줄러 | 덜 쓴 스레드에게 약 3ms씩 차례를 준다 (6.6부터 EEVDF) | 계산 스레드가 vCPU보다 많으면 스위칭 비용이 커진다 |
+| request | 경합 때 weight 비율로 나눠 받을 몫, kube-scheduler의 배치 기준 | 남는 CPU는 더 쓴다. 실측으로 꼭 정한다 |
+| limit | 100ms마다 쓸 CPU 시간의 합, 5ms 조각으로 나눠 준다 | 다 쓰면 노드 CPU가 남아도 멈춘다 |
+| 진단 | CPU 때문에 느린지는 `cpu.pressure`, 쓰로틀인지는 `nr_throttled ÷ nr_periods` | 사용률 그래프로는 둘 다 잘 안 보인다 |
+| Node.js | JS는 메인 스레드 하나, 대기는 epoll이 맡는다 | 콜백 하나가 오래 잡으면 전부 멈춘다. GC 때문에 1000m을 넘는다 |
+| limit 제거 | 쓰로틀이 없어진다 | 런타임이 노드 코어 수를 보지 않게 CPU 수를 직접 정한다 |
 
 ## 참고
 
-- [Kubernetes — Resource Management for Pods and Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
+- [Linux kernel — EEVDF Scheduler](https://docs.kernel.org/scheduler/sched-eevdf.html)
 - [Linux kernel — CFS Bandwidth Control](https://docs.kernel.org/scheduler/sched-bwc.html)
 - [Linux kernel — Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
-- [Kubernetes — The Shift to cgroup v2 in Kubernetes](https://kubernetes.io/blog/2026/10/06/kubernetes-cgroups-v2-shift/)
-- [perf-stat(1)](https://man7.org/linux/man-pages/man1/perf-stat.1.html)
+- [Linux kernel — PSI, Pressure Stall Information](https://docs.kernel.org/accounting/psi.html)
+- [Brendan Gregg — Linux Load Averages: Solving the Mystery](https://www.brendangregg.com/blog/2017-08-08/linux-load-averages.html)
+- [Kubernetes — Resource Management for Pods and Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
+- [Kubernetes — New Conversion from cgroup v1 CPU Shares to v2 CPU Weight](https://kubernetes.io/blog/2026/01/30/new-cgroup-v1-to-v2-cpu-conversion-formula/)
+- [Kubernetes — Control CPU Management Policies on the Node](https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/)
 - [Node.js — Don't Block the Event Loop](https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop)
 - [libuv — Thread pool work scheduling](https://docs.libuv.org/en/v1.x/threadpool.html)
-- [Node.js — worker_threads](https://nodejs.org/api/worker_threads.html)
 - [epoll(7)](https://man7.org/linux/man-pages/man7/epoll.7.html)
 - [V8 — Concurrent marking](https://v8.dev/blog/concurrent-marking)
-- [Node.js CLI — --v8-pool-size](https://nodejs.org/api/cli.html#--v8-pool-sizenum)
-- [Node.js CLI — --cpu-prof](https://nodejs.org/api/cli.html#--cpu-prof)
 - [Go — Container-aware GOMAXPROCS](https://go.dev/blog/container-aware-gomaxprocs)
 - [OpenJDK — JDK-8281181 Do not use CPU Shares to compute active processor count](https://bugs.openjdk.org/browse/JDK-8281181)
-- [fast-json-stringify](https://github.com/fastify/fast-json-stringify)
 - 비유 참고: [컴알못을 위한 노예비유법 (컴퓨터 스펙 보는 법)](https://xsangraalx.tistory.com/20)
-- 원글: [CPU](https://kimjanghyun1010.tistory.com/89), [cpu limit](https://kimjanghyun1010.tistory.com/101), [node.js 이해하기](https://kimjanghyun1010.tistory.com/118)
